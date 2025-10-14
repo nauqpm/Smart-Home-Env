@@ -18,111 +18,198 @@ except Exception:
 
 class SmartHomeEnv(gym.Env):
     metadata = {'render.modes': ['human']}
-    def __init__(self, price_profile, pv_profile, config):
+    def __init__(self, price_profile, pv_profile, config, forecast_horizon=3):
         super().__init__()
         self.price = np.array(price_profile)
         self.pv = np.array(pv_profile)
         self.T = len(self.price)
         self.cfg = config
+        self.forecast_horizon = forecast_horizon
+        self.P_grid = 0.0
+        self.time_step = 1.0
+        self.total_energy_bought = 0.0
         self.N_ad = len(config.get('adjustable', []))
         self.N_su = len(config.get('shiftable_su', []))
         self.N_si = len(config.get('shiftable_si', []))
-        obs_len = 4 + self.N_si + self.N_su
-        self.observation_space = spaces.Box(low=-1e6, high=1e6, shape=(obs_len,), dtype=np.float32)
+
+        bat = self.cfg.get('battery', {})
+        self.C_bat = bat.get('C_bat', 10.0)
+
+        obs_len = 4 + self.N_si + self.N_su + (2 * self.forecast_horizon)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_len,), dtype=np.float32)
         self.action_space = spaces.MultiBinary(self.N_su + self.N_si)
         self.reset()
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
         self.t = 0
         bat = self.cfg.get('battery', {})
         self.SOC = bat.get('soc0', 0.5)
-        self.Ot_si = [0]*self.N_si
-        self.su_started = [False]*self.N_su
-        self.su_remaining = [self.cfg['shiftable_su'][i]['L'] if self.N_su>0 else 0 for i in range(self.N_su)]
+        self.Ot_si = [0] * self.N_si
+        self.su_started = [False] * self.N_su
+        self.su_remaining = [0] * self.N_su
         self.total_cost = 0.0
-        return self._get_obs()
+        self.total_energy_bought = 0.0
+
+        return self._get_obs(), {}
 
     def _get_obs(self):
-        t_norm = self.t / max(1, self.T-1)
-        rho = self.price[self.t]
-        pv = self.pv[self.t]
+        current_t = min(self.t, self.T - 1)
+
+        t_norm = current_t / max(1, self.T - 1)
+        rho = self.price[current_t]
+        pv = self.pv[current_t]
+
         obs = [t_norm, rho, pv, self.SOC]
         obs += self.Ot_si
-        obs += [1.0 if s else 0.0 for s in self.su_started]
+        obs += [1.0 if s > 0 else 0.0 for s in self.su_remaining]
+
+        # Lấy lát cắt dự báo
+        future_prices = self.price[current_t + 1: current_t + 1 + self.forecast_horizon]
+        future_pvs = self.pv[current_t + 1: current_t + 1 + self.forecast_horizon]
+
+        pad_width_prices = self.forecast_horizon - len(future_prices)
+        pad_width_pvs = self.forecast_horizon - len(future_pvs)
+
+        # Nếu cần đệm, sử dụng mode='constant' với giá trị cuối cùng được biết
+        if pad_width_prices > 0:
+            future_prices = np.pad(future_prices, (0, pad_width_prices), mode='constant', constant_values=rho)
+
+        if pad_width_pvs > 0:
+            future_pvs = np.pad(future_pvs, (0, pad_width_pvs), mode='constant', constant_values=pv)
+
+
+        obs.extend(future_prices)
+        obs.extend(future_pvs)
+
         return np.array(obs, dtype=np.float32)
 
-    def step(self, action):
-        action = np.array(action).astype(int)
-        act_su = action[:self.N_su].tolist() if self.N_su > 0 else []
-        act_si = action[self.N_su:].tolist() if self.N_si > 0 else []
+    def _get_tiered_price(self, total_kwh: float) -> float:
+        """
+        Tính giá điện trung bình theo kWh dựa trên biểu giá bậc thang.
+        Hàm này được tách ra để tăng tính rõ ràng và hiệu quả.
+        """
+        tiers = [
+            (50, 1984), (100, 2050), (200, 2380),
+            (300, 2998), (400, 3350), (float('inf'), 3460)
+        ]
 
-        # ===== TÍNH TOÁN TẢI =====
-        # SU
+        # Nếu không sử dụng điện, giá là bậc thấp nhất để tránh chia cho 0
+        if total_kwh <= 0:
+            return tiers[0][1] / 1000.0
+
+        remaining_kwh, cost, last_limit = total_kwh, 0, 0
+        for limit, price_vnd in tiers:
+            usage_in_tier = min(remaining_kwh, limit - last_limit)
+            cost += usage_in_tier * price_vnd
+            remaining_kwh -= usage_in_tier
+            last_limit = limit
+            if remaining_kwh <= 0:
+                break
+
+        # Trả về giá trung bình, quy đổi từ VND sang đơn vị tiền tệ của môi trường (nếu cần)
+        return (cost / total_kwh) / 1000.0
+
+    def step(self, action: np.ndarray):
+        """
+        Thực hiện một bước trong môi trường, tính toán trạng thái tiếp theo và phần thưởng.
+        """
+        # ===== 1. XỬ LÝ HÀNH ĐỘNG VÀ TÍNH TẢI CƠ BẢN =====
+        action = np.array(action).astype(int)
+        act_su = action[:self.N_su]
+        act_si = action[self.N_su:]
+
+        # Tải SU (không thể ngắt quãng)
         P_su_t = 0.0
         for i in range(self.N_su):
             su = self.cfg["shiftable_su"][i]
-            if self.t >= su["t_s"] and self.t <= su["t_f"]:
-                if act_su[i] == 1:  # bật
-                    P_su_t += su["rate"]
+            if self.su_remaining[i] > 0:
+                P_su_t += su["rate"]
+                self.su_remaining[i] -= 1
+            elif not self.su_started[i] and act_su[i] == 1 and su["t_s"] <= self.t <= su["t_f"]:
+                P_su_t += su["rate"]
+                self.su_started[i] = True
+                self.su_remaining[i] = su["L"] - 1
 
-        # SI
+        # Tải SI (có thể ngắt quãng)
         P_si_t = 0.0
         for i in range(self.N_si):
             si = self.cfg["shiftable_si"][i]
-            if self.t >= si["t_s"] and self.t <= si["t_f"]:
-                if act_si[i] == 1:
-                    P_si_t += si["rate"]
-                    self.Ot_si[i] += 1
+            if act_si[i] == 1 and si["t_s"] <= self.t <= si["t_f"]:
+                P_si_t += si["rate"]
+                self.Ot_si[i] += 1
 
+        # Tổng tải cơ bản (chưa bao gồm tải điều chỉnh được)
         P_cr_t = self.cfg.get("critical", [0.0] * self.T)[self.t]
-        P_ad_t = sum(ad["P_com"] for ad in self.cfg.get("adjustable", []))  # đơn giản: luôn chạy ở P_com
+        P_base_load = P_cr_t + P_su_t + P_si_t
 
-        P_load = P_cr_t + P_ad_t + P_su_t + P_si_t
+        # ===== 2. CÂN BẰNG NĂNG LƯỢNG SƠ BỘ (PV & PIN) =====
         P_pv = self.pv[self.t]
+        P_net_after_pv = P_base_load - P_pv
 
-        # ===== XỬ LÝ PIN =====
-        bat = self.cfg.get("battery", {})
-        soc_min = bat.get("soc_min", 0.1)
-        soc_max = bat.get("soc_max", 0.9)
-        eta_ch = bat.get("eta_ch", 0.95)
-        eta_dis = bat.get("eta_dis", 0.95)
+        # Lấy thông số pin
+        bat_cfg = self.cfg.get("battery", {})
+        soc_min, soc_max = bat_cfg.get("soc_min", 0.1), bat_cfg.get("soc_max", 0.9)
+        eta_ch, eta_dis = bat_cfg.get("eta_ch", 0.95), bat_cfg.get("eta_dis", 0.95)
+        P_ch, P_dis = 0.0, 0.0
 
-        P_ch = 0.0
-        P_dis = 0.0
+        if P_net_after_pv < 0:  # TH1: Thừa năng lượng mặt trời -> Sạc pin
+            P_to_charge = -P_net_after_pv
+            max_charge_power = (soc_max - self.SOC) * self.C_bat / (eta_ch * self.time_step)
+            P_ch = min(P_to_charge, max_charge_power)
+            self.SOC += P_ch * eta_ch * self.time_step / self.C_bat if self.C_bat > 0 else 0
+        else:  # TH2: Thiếu năng lượng mặt trời -> Xả pin
+            P_to_discharge = P_net_after_pv
+            max_discharge_power = (self.SOC - soc_min) * self.C_bat * eta_dis / self.time_step
+            P_dis = min(P_to_discharge, max_discharge_power)
+            self.SOC -= P_dis / eta_dis * self.time_step / self.C_bat if self.C_bat > 0 and eta_dis > 0 else 0
 
-        if P_pv >= P_load:
-            # dư điện, ưu tiên sạc pin
-            P_surplus = P_pv - P_load
-            if self.SOC < soc_max:
-                P_ch = P_surplus
-                self.SOC = min(soc_max, self.SOC + eta_ch * P_ch / self.T)
-        else:
-            # thiếu điện, ưu tiên xả pin
-            P_deficit = P_load - P_pv
-            if self.SOC > soc_min:
-                P_dis = min(P_deficit, (self.SOC - soc_min) * self.T / eta_dis)
-                self.SOC = max(soc_min, self.SOC - P_dis * eta_dis / self.T)
+        # Công suất ròng còn lại sau khi đã dùng PV và pin
+        P_net_after_battery = P_net_after_pv + P_ch - P_dis
 
-        # ===== REWARD =====
-        # reward phạt nếu còn thiếu điện (PV + pin < load)
-        P_supplied = P_pv + P_dis
-        unmet = max(0, P_load - P_supplied)
-        reward = - (unmet * 10.0)  # phạt nặng nếu không đủ điện
+        # ===== 3. TỐI ƯU HÓA TẢI ĐIỀU CHỈNH & LƯỚI ĐIỆN =====
+        # Gọi bộ giải để quyết định công suất cho tải điều chỉnh và lượng điện mua từ lưới
+        P_ad_list, P_b, _ = self._solve_one_step(P_net_after_battery)
+        self.P_grid = P_b if P_b is not None else 0.0
+        P_ad_t = sum(P_ad_list)
+        P_total_load = P_base_load + P_ad_t
 
-        self.total_cost += reward
+        # ===== 4. TÍNH TOÁN CHI PHÍ VÀ PHẦN THƯỞNG =====
+        energy_bought = self.P_grid * self.time_step
+        self.total_energy_bought += energy_bought
+        price_per_kwh = self._get_tiered_price(self.total_energy_bought)
+        cost = energy_bought * price_per_kwh
+        self.total_cost += cost
+
+        # Phạt nếu không đáp ứng đủ tải
+        unmet_load = max(0, P_net_after_battery + P_ad_t - self.P_grid)
+
+        # Tính toán phần thưởng dựa trên chế độ đã chọn
+        mode = self.cfg.get("reward_mode", "balanced")
+        penalty_battery = -0.05 * (abs(P_ch) + abs(P_dis))
+        penalty_unmet = -10.0 * unmet_load
+        reward = -cost + penalty_battery + penalty_unmet
+
+        if mode == "advanced":
+            pv_used = min(P_pv, P_total_load + P_ch)
+            reward += 0.03 * pv_used  # Thưởng tận dụng PV
+            if 17 <= self.t % 24 <= 21:
+                reward -= 0.5 * cost  # Phạt thêm giờ cao điểm
+            if 0.4 <= self.SOC <= 0.8:
+                reward += 0.01  # Thưởng giữ SOC ổn định
+
+        # ===== 5. CẬP NHẬT TRẠNG THÁI VÀ TRẢ VỀ =====
         self.t += 1
-        done = self.t >= self.T
+        done = (self.t >= self.T)
         obs = self._get_obs() if not done else np.zeros(self.observation_space.shape, dtype=np.float32)
 
         info = {
-            "P_pv": P_pv,
-            "P_load": P_load,
-            "P_ch": P_ch,
-            "P_dis": P_dis,
-            "SOC": self.SOC,
-            "unmet": unmet
+            "P_pv": P_pv, "P_load": P_total_load, "P_grid": self.P_grid,
+            "P_ch": P_ch, "P_dis": P_dis, "SOC": self.SOC, "cost": cost,
+            "unmet_load": unmet_load, "price_per_kwh": price_per_kwh
         }
-        return obs, reward, done, info
+
+        return obs, reward, done, False, info
 
     def _solve_one_step(self, P_net_without_ad):
         # Heuristic fallback if pulp missing
@@ -165,6 +252,33 @@ class SmartHomeEnv(gym.Env):
         P_s = float(pulp.value(P_s_var)) if pulp.value(P_s_var) is not None else 0.0
         return P_ad, P_b, P_s
 
+    def get_tiered_price(total_consumption_kwh):
+        # Giá điện theo bậc (đồng/kWh)
+        tiers = [
+            (50, 1984),
+            (100, 2050),
+            (200, 2380),
+            (300, 2998),
+            (400, 3350),
+            (float('inf'), 3460),
+        ]
+
+        # Tính toán giá trung bình (theo mức dùng tích lũy)
+        remaining = total_consumption_kwh
+        cost = 0
+        last_limit = 0
+
+        for limit, price in tiers:
+            usage = min(remaining, limit - last_limit)
+            cost += usage * price
+            remaining -= usage
+            last_limit = limit
+            if remaining <= 0:
+                break
+
+        avg_price = cost / total_consumption_kwh if total_consumption_kwh > 0 else tiers[0][1]
+        return avg_price / 1000  # đổi sang kWh → đồng/kWh (nếu cần scale)
+
     def render(self, mode='human'):
         print(f"t={self.t}, total_cost={self.total_cost:.3f}")
 
@@ -183,7 +297,8 @@ if __name__ == "__main__":
         'shiftable_su': [ {'rate':0.5, 'L':2, 't_s':6, 't_f':20}, {'rate':0.6, 'L':1, 't_s':8, 't_f':22} ],
         'shiftable_si': [ {'rate':1.0, 'E':4.0, 't_s':0, 't_f':23} ],
         'beta': 0.5,
-        'battery': {'soc0':0.5, 'soc_min':0.1, 'soc_max':0.9}
+        'battery': {'soc0':0.5, 'soc_min':0.1, 'soc_max':0.9},
+        "reward_mode": "advanced"
     }
     env = SmartHomeEnv(price, pv, config)
     obs = env.reset()
