@@ -2,84 +2,93 @@ import numpy as np
 import matplotlib.pyplot as plt
 from smart_home_env import SmartHomeEnv
 
-# số bước (24 giờ)
+# ===== MÔ PHỎNG THỜI TIẾT =====
 T = 24
+weather_states = ["sunny", "cloudy", "rainy", "mixed"]
 
-# tạo dữ liệu test
-np.random.seed(42)
-price = 0.1 + 0.2 * np.random.rand(T)  # giá điện giả định
-pv = np.clip(5.0 * np.sin(np.linspace(0, 3.14, T)) + 0.3*np.random.randn(T), 0, None)  # PV mạnh
+# Base PV profile (trước khi thêm nhiễu thời tiết)
+base_pv = np.clip(
+    1.5 * np.sin(np.linspace(0, 3.14, T)) + 0.2 * np.random.randn(T),
+    0,
+    None
+)
 
-# cấu hình hệ thống
+# Vì mô hình thời tiết đã xử lý trong SmartHomeEnv,
+# ta chỉ cần truyền PV cơ bản để mô phỏng.
+pv = base_pv
+
+# Giá điện theo giờ tại Việt Nam (mô phỏng)
+price = np.array([0.1]*6 + [0.15]*6 + [0.25]*6 + [0.18]*6)  # VN electricity rate (day-night pattern)
+
+# ===== CẤU HÌNH HỆ THỐNG =====
 cfg = {
-    "critical": [0.3] * T,
+    "critical": [  # baseline 0.33, tăng vào buổi tối
+        0.33,0.33,0.33,0.33,0.33,0.33,  # 0–5h
+        0.33,0.33,0.33,0.33,0.33,0.33,  # 6–11h
+        0.33,0.33,0.33,0.33,0.33,0.53,  # 12–17h
+        0.53,0.53,0.53,0.53,0.53,0.33   # 18–23h
+    ],
     "adjustable": [
-        {"P_min": 0.1, "P_max": 1.5, "P_com": 1.2, "alpha": 0.06},
-        {"P_min": 0.0, "P_max": 1.2, "P_com": 1.0, "alpha": 0.12}
+        {"P_min": 0.5, "P_max": 2.0, "P_com": 1.5, "alpha": 0.06},  # AC
+        {"P_min": 0.0, "P_max": 2.0, "P_com": 1.5, "alpha": 0.08}   # Water heater
     ],
     "shiftable_su": [
-        {"rate": 0.5, "L": 3, "t_s": 6, "t_f": 20},
-        {"rate": 0.6, "L": 2, "t_s": 8, "t_f": 22}
+        {"rate": 0.5, "L": 1, "t_s": 7,  "t_f": 22},  # Washing machine
+        {"rate": 0.8, "L": 1, "t_s": 19, "t_f": 23}   # Dishwasher
     ],
-    "shiftable_si": [{"rate": 1.0, "E": 4.0, "t_s": 0, "t_f": 23}],
-    # Thêm C_bat vào cấu hình pin
-    "battery": {"soc0": 0.5, "soc_min": 0.1, "soc_max": 0.9, "C_bat": 13.0}
+    "shiftable_si": [
+        {"rate": 3.3, "E": 7.0, "t_s": 0, "t_f": 23}  # EV charger
+    ],
+    "beta": 0.5,
+    "battery": {"soc0": 0.5, "soc_min": 0.1, "soc_max": 0.9, "eta_ch": 0.95, "eta_dis": 0.95}
 }
 
-# khởi tạo môi trường
-env = SmartHomeEnv(price, pv, cfg, forecast_horizon=3)
-obs, info = env.reset()
+print("🚀 Mô phỏng SmartHomeEnv đang khởi tạo...")
+
+# ===== KHỞI TẠO MÔI TRƯỜNG =====
+env = SmartHomeEnv(price, pv, cfg)
+obs = env.reset()
 done = False
-total_reward = 0.0
+rewards, soc_hist, pv_hist, load_hist, grid_hist, weather_hist = [], [], [], [], [], []
 
-# log dữ liệu
-rewards = []
-soc_hist = []
-pv_hist = []
-load_hist = []
-grid_hist = []
-
-# chạy 1 episode
 while not done:
-    action = env.action_space.sample()  # Hành động ngẫu nhiên
-    obs, reward, done, truncated, info = env.step(action)
-    total_reward += reward
-
-    rewards.append(reward);
+    action = env.action_space.sample()
+    obs, reward, done, info = env.step(action)
+    rewards.append(reward)
     soc_hist.append(info["SOC"])
-    pv_hist.append(info["P_pv"]);
+    pv_hist.append(info["P_pv"])
     load_hist.append(info["P_load"])
     grid_hist.append(info["P_grid"])
+    weather_hist.append(info.get("weather", "N/A"))
 
-print("===== Episode kết thúc =====")
-print(f"Tổng reward: {total_reward:.3f}")
-print(f"Tổng chi phí: {env.total_cost:.3f}")
-
-# Vẽ biểu đồ
-fig, axs = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
-
-# 1. PV vs Load
-axs[0].plot(range(T), pv_hist, label="PV (kW)")
-axs[0].plot(range(T), load_hist, label="Load (kW)")
+# ===== BIỂU ĐỒ =====
+fig, axs = plt.subplots(5, 1, figsize=(10, 11), sharex=True)
+axs[0].plot(pv_hist, label="PV (kW)")
+axs[0].plot(load_hist, label="Load (kW)")
 axs[0].set_ylabel("Power (kW)")
 axs[0].set_title("PV vs Load")
 axs[0].legend()
 
-# 2. Battery SOC
-axs[1].plot(range(T), soc_hist, color="orange")
+axs[1].plot(soc_hist, color="orange")
 axs[1].set_ylabel("SOC")
 axs[1].set_title("Battery SOC")
 
-# 3. Grid Power
-axs[2].plot(range(T), grid_hist, color="red")
-axs[2].set_ylabel("P_grid (kW)")
-axs[2].set_title("Power from/to Grid")
+axs[2].plot(grid_hist, color="red")
+axs[2].set_ylabel("Grid Power (kW)")
+axs[2].set_title("Power Bought from Grid")
 
-# 4. Reward
 axs[3].bar(range(T), rewards, color="green")
 axs[3].set_ylabel("Reward")
-axs[3].set_xlabel("Timestep")
-axs[3].set_title("Reward per timestep")
+axs[3].set_xlabel("Hour")
+axs[3].set_title("Reward per Hour")
+
+# Biểu đồ thời tiết
+weather_numeric = [weather_states.index(w) if w in weather_states else -1 for w in weather_hist]
+axs[4].plot(weather_numeric, marker="o", color="blue")
+axs[4].set_yticks(range(len(weather_states)))
+axs[4].set_yticklabels(weather_states)
+axs[4].set_ylabel("Weather")
+axs[4].set_title("Weather Pattern (Simulated)")
 
 plt.tight_layout()
 plt.show()

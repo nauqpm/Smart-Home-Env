@@ -18,198 +18,173 @@ except Exception:
 
 class SmartHomeEnv(gym.Env):
     metadata = {'render.modes': ['human']}
+
     def __init__(self, price_profile, pv_profile, config, forecast_horizon=3):
         super().__init__()
         self.price = np.array(price_profile)
         self.pv = np.array(pv_profile)
-        self.T = len(self.price)
         self.cfg = config
+        self.T = len(self.price)
         self.forecast_horizon = forecast_horizon
-        self.P_grid = 0.0
-        self.time_step = 1.0
+        # === MÔ PHỎNG THỜI TIẾT ===
+        self.weather_states = ["sunny", "mild", "cloudy", "rainy", "stormy"]
+        self.weather_factors = {
+            "sunny": 1.0,
+            "mild": 0.8,
+            "cloudy": 0.5,
+            "rainy": 0.3,
+            "stormy": 0.1
+        }
+        # Ma trận chuyển Markov cho thời tiết
+        self.weather_transition = {
+            "sunny": [0.6, 0.25, 0.1, 0.04, 0.01],
+            "mild": [0.2, 0.5, 0.2, 0.08, 0.02],
+            "cloudy": [0.1, 0.2, 0.4, 0.2, 0.1],
+            "rainy": [0.05, 0.1, 0.25, 0.4, 0.2],
+            "stormy": [0.02, 0.08, 0.2, 0.3, 0.4]
+        }
+
+        # Thông số chung
+        self.time_step = 1.0  # 1h mỗi bước
+        self.total_cost = 0.0
         self.total_energy_bought = 0.0
+
+        # Cấu hình tải
         self.N_ad = len(config.get('adjustable', []))
         self.N_su = len(config.get('shiftable_su', []))
         self.N_si = len(config.get('shiftable_si', []))
 
-        bat = self.cfg.get('battery', {})
-        self.C_bat = bat.get('C_bat', 10.0)
-
-        obs_len = 4 + self.N_si + self.N_su + (2 * self.forecast_horizon)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_len,), dtype=np.float32)
+        # Không gian quan sát và hành động
+        obs_len = 4 + self.N_si + self.N_su
+        self.observation_space = spaces.Box(low=-1e6, high=1e6, shape=(obs_len,), dtype=np.float32)
         self.action_space = spaces.MultiBinary(self.N_su + self.N_si)
+
         self.reset()
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
+    def reset(self):
         self.t = 0
         bat = self.cfg.get('battery', {})
         self.SOC = bat.get('soc0', 0.5)
         self.Ot_si = [0] * self.N_si
         self.su_started = [False] * self.N_su
-        self.su_remaining = [0] * self.N_su
+        self.su_remaining = [self.cfg['shiftable_su'][i]['L'] for i in range(self.N_su)]
         self.total_cost = 0.0
         self.total_energy_bought = 0.0
-
-        return self._get_obs(), {}
+        # === KHỞI TẠO DỮ LIỆU THỜI TIẾT ===
+        self.current_weather = "mild"
+        self.weather_series = []
+        for t in range(self.T):
+            probs = self.weather_transition[self.current_weather]
+            self.current_weather = np.random.choice(self.weather_states, p=probs)
+            self.weather_series.append(self.current_weather)
+        return self._get_obs()
 
     def _get_obs(self):
-        current_t = min(self.t, self.T - 1)
+        # Observation bao gồm dự báo ngắn hạn
+        t_norm = self.t / max(1, self.T - 1)
+        rho = self.price[self.t]
+        pv_now = self.pv[self.t]
 
-        t_norm = current_t / max(1, self.T - 1)
-        rho = self.price[current_t]
-        pv = self.pv[current_t]
+        # dự báo PV và giá (theo horizon)
+        forecast_prices = self.price[self.t:min(self.t + self.forecast_horizon, self.T)]
+        forecast_pv = self.pv[self.t:min(self.t + self.forecast_horizon, self.T)]
 
-        obs = [t_norm, rho, pv, self.SOC]
+        obs = [t_norm, rho, pv_now, self.SOC]
+        obs += forecast_prices.tolist() + forecast_pv.tolist()
         obs += self.Ot_si
-        obs += [1.0 if s > 0 else 0.0 for s in self.su_remaining]
-
-        # Lấy lát cắt dự báo
-        future_prices = self.price[current_t + 1: current_t + 1 + self.forecast_horizon]
-        future_pvs = self.pv[current_t + 1: current_t + 1 + self.forecast_horizon]
-
-        pad_width_prices = self.forecast_horizon - len(future_prices)
-        pad_width_pvs = self.forecast_horizon - len(future_pvs)
-
-        # Nếu cần đệm, sử dụng mode='constant' với giá trị cuối cùng được biết
-        if pad_width_prices > 0:
-            future_prices = np.pad(future_prices, (0, pad_width_prices), mode='constant', constant_values=rho)
-
-        if pad_width_pvs > 0:
-            future_pvs = np.pad(future_pvs, (0, pad_width_pvs), mode='constant', constant_values=pv)
-
-
-        obs.extend(future_prices)
-        obs.extend(future_pvs)
-
+        obs += [1.0 if s else 0.0 for s in self.su_started]
         return np.array(obs, dtype=np.float32)
 
-    def _get_tiered_price(self, total_kwh: float) -> float:
-        """
-        Tính giá điện trung bình theo kWh dựa trên biểu giá bậc thang.
-        Hàm này được tách ra để tăng tính rõ ràng và hiệu quả.
-        """
-        tiers = [
-            (50, 1984), (100, 2050), (200, 2380),
-            (300, 2998), (400, 3350), (float('inf'), 3460)
-        ]
-
-        # Nếu không sử dụng điện, giá là bậc thấp nhất để tránh chia cho 0
-        if total_kwh <= 0:
-            return tiers[0][1] / 1000.0
-
-        remaining_kwh, cost, last_limit = total_kwh, 0, 0
-        for limit, price_vnd in tiers:
-            usage_in_tier = min(remaining_kwh, limit - last_limit)
-            cost += usage_in_tier * price_vnd
-            remaining_kwh -= usage_in_tier
-            last_limit = limit
-            if remaining_kwh <= 0:
-                break
-
-        # Trả về giá trung bình, quy đổi từ VND sang đơn vị tiền tệ của môi trường (nếu cần)
-        return (cost / total_kwh) / 1000.0
-
-    def step(self, action: np.ndarray):
-        """
-        Thực hiện một bước trong môi trường, tính toán trạng thái tiếp theo và phần thưởng.
-        """
-        # ===== 1. XỬ LÝ HÀNH ĐỘNG VÀ TÍNH TẢI CƠ BẢN =====
+    def step(self, action):
         action = np.array(action).astype(int)
-        act_su = action[:self.N_su]
-        act_si = action[self.N_su:]
+        act_su = action[:self.N_su].tolist() if self.N_su > 0 else []
+        act_si = action[self.N_su:].tolist() if self.N_si > 0 else []
 
-        # Tải SU (không thể ngắt quãng)
-        P_su_t = 0.0
-        for i in range(self.N_su):
-            su = self.cfg["shiftable_su"][i]
-            if self.su_remaining[i] > 0:
-                P_su_t += su["rate"]
-                self.su_remaining[i] -= 1
-            elif not self.su_started[i] and act_su[i] == 1 and su["t_s"] <= self.t <= su["t_f"]:
-                P_su_t += su["rate"]
-                self.su_started[i] = True
-                self.su_remaining[i] = su["L"] - 1
+        # ===== 1. TÍNH TOÁN TẢI =====
+        P_su_t = sum(su["rate"] for i, su in enumerate(self.cfg["shiftable_su"])
+                     if self.t >= su["t_s"] and self.t <= su["t_f"] and act_su[i] == 1)
+        P_si_t = sum(si["rate"] for i, si in enumerate(self.cfg["shiftable_si"])
+                     if self.t >= si["t_s"] and self.t <= si["t_f"] and act_si[i] == 1)
 
-        # Tải SI (có thể ngắt quãng)
-        P_si_t = 0.0
-        for i in range(self.N_si):
-            si = self.cfg["shiftable_si"][i]
-            if act_si[i] == 1 and si["t_s"] <= self.t <= si["t_f"]:
-                P_si_t += si["rate"]
-                self.Ot_si[i] += 1
-
-        # Tổng tải cơ bản (chưa bao gồm tải điều chỉnh được)
         P_cr_t = self.cfg.get("critical", [0.0] * self.T)[self.t]
-        P_base_load = P_cr_t + P_su_t + P_si_t
-
-        # ===== 2. CÂN BẰNG NĂNG LƯỢNG SƠ BỘ (PV & PIN) =====
+        P_ad_t = sum(ad["P_com"] for ad in self.cfg.get("adjustable", []))
+        P_load = P_cr_t + P_ad_t + P_su_t + P_si_t
         P_pv = self.pv[self.t]
-        P_net_after_pv = P_base_load - P_pv
 
-        # Lấy thông số pin
-        bat_cfg = self.cfg.get("battery", {})
-        soc_min, soc_max = bat_cfg.get("soc_min", 0.1), bat_cfg.get("soc_max", 0.9)
-        eta_ch, eta_dis = bat_cfg.get("eta_ch", 0.95), bat_cfg.get("eta_dis", 0.95)
+        # === TÁC ĐỘNG CỦA THỜI TIẾT LÊN PV ===
+        weather = self.weather_series[self.t]
+        weather_factor = self.weather_factors[weather]
+        P_pv = self.pv[self.t] * weather_factor
+
+        # ===== 2. XỬ LÝ PIN =====
+        bat = self.cfg.get("battery", {})
+        soc_min = bat.get("soc_min", 0.1)
+        soc_max = bat.get("soc_max", 0.9)
+        eta_ch = bat.get("eta_ch", 0.95)
+        eta_dis = bat.get("eta_dis", 0.95)
+
         P_ch, P_dis = 0.0, 0.0
+        if P_pv >= P_load:
+            P_surplus = P_pv - P_load
+            if self.SOC < soc_max:
+                P_ch = P_surplus
+                self.SOC = min(soc_max, self.SOC + eta_ch * P_ch / self.T)
+        else:
+            P_deficit = P_load - P_pv
+            if self.SOC > soc_min:
+                P_dis = min(P_deficit, (self.SOC - soc_min) * self.T / eta_dis)
+                self.SOC = max(soc_min, self.SOC - P_dis * eta_dis / self.T)
 
-        if P_net_after_pv < 0:  # TH1: Thừa năng lượng mặt trời -> Sạc pin
-            P_to_charge = -P_net_after_pv
-            max_charge_power = (soc_max - self.SOC) * self.C_bat / (eta_ch * self.time_step)
-            P_ch = min(P_to_charge, max_charge_power)
-            self.SOC += P_ch * eta_ch * self.time_step / self.C_bat if self.C_bat > 0 else 0
-        else:  # TH2: Thiếu năng lượng mặt trời -> Xả pin
-            P_to_discharge = P_net_after_pv
-            max_discharge_power = (self.SOC - soc_min) * self.C_bat * eta_dis / self.time_step
-            P_dis = min(P_to_discharge, max_discharge_power)
-            self.SOC -= P_dis / eta_dis * self.time_step / self.C_bat if self.C_bat > 0 and eta_dis > 0 else 0
+        # ===== 3. CÂN BẰNG LƯỚI =====
+        supply = P_pv + P_dis
+        demand = P_load + P_ch
+        self.P_grid = max(0, demand - supply)  # chỉ mua điện
 
-        # Công suất ròng còn lại sau khi đã dùng PV và pin
-        P_net_after_battery = P_net_after_pv + P_ch - P_dis
-
-        # ===== 3. TỐI ƯU HÓA TẢI ĐIỀU CHỈNH & LƯỚI ĐIỆN =====
-        # Gọi bộ giải để quyết định công suất cho tải điều chỉnh và lượng điện mua từ lưới
-        P_ad_list, P_b, _ = self._solve_one_step(P_net_after_battery)
-        self.P_grid = P_b if P_b is not None else 0.0
-        P_ad_t = sum(P_ad_list)
-        P_total_load = P_base_load + P_ad_t
-
-        # ===== 4. TÍNH TOÁN CHI PHÍ VÀ PHẦN THƯỞNG =====
-        energy_bought = self.P_grid * self.time_step
-        self.total_energy_bought += energy_bought
-        price_per_kwh = self._get_tiered_price(self.total_energy_bought)
-        cost = energy_bought * price_per_kwh
+        # ===== 4. REWARD ADVANCED =====
+        price = self.price[self.t]
+        cost = self.P_grid * price
         self.total_cost += cost
+        self.total_energy_bought += self.P_grid * self.time_step
 
-        # Phạt nếu không đáp ứng đủ tải
-        unmet_load = max(0, P_net_after_battery + P_ad_t - self.P_grid)
-
-        # Tính toán phần thưởng dựa trên chế độ đã chọn
-        mode = self.cfg.get("reward_mode", "balanced")
+        hour = self.t % 24
+        is_night = (hour < 6 or hour >= 18)
+        penalty_unmet = -10.0 * max(0, demand - supply - self.P_grid)
         penalty_battery = -0.05 * (abs(P_ch) + abs(P_dis))
-        penalty_unmet = -10.0 * unmet_load
-        reward = -cost + penalty_battery + penalty_unmet
 
-        if mode == "advanced":
-            pv_used = min(P_pv, P_total_load + P_ch)
-            reward += 0.03 * pv_used  # Thưởng tận dụng PV
-            if 17 <= self.t % 24 <= 21:
-                reward -= 0.5 * cost  # Phạt thêm giờ cao điểm
-            if 0.4 <= self.SOC <= 0.8:
-                reward += 0.01  # Thưởng giữ SOC ổn định
+        # Reward khởi tạo
+        reward = -cost + penalty_unmet + penalty_battery
 
-        # ===== 5. CẬP NHẬT TRẠNG THÁI VÀ TRẢ VỀ =====
+        # Logic ban đêm
+        if is_night:
+            if self.P_grid > 0:
+                reward -= 0.2 * cost  # phạt thêm nếu dùng điện lưới
+            elif P_dis > 0:
+                reward += 0.05 * P_dis  # thưởng nhẹ nếu dùng pin
+
+        # Logic nâng cao: SOC, giờ cao điểm, tận dụng PV
+        if 17 <= hour <= 21:
+            reward -= 0.5 * cost  # phạt giờ cao điểm
+        if 0.4 <= self.SOC <= 0.8:
+            reward += 0.02  # thưởng SOC ổn định
+        reward += 0.03 * min(P_pv, P_load)  # thưởng tận dụng PV
+
+        info = {
+            "P_pv": P_pv,
+            "P_load": P_load,
+            "P_ch": P_ch,
+            "P_dis": P_dis,
+            "P_grid": self.P_grid,
+            "SOC": self.SOC,
+            "cost": cost,
+            "is_night": is_night,
+            "weather": weather,
+            "weather_factor": weather_factor
+        }
+
         self.t += 1
         done = (self.t >= self.T)
         obs = self._get_obs() if not done else np.zeros(self.observation_space.shape, dtype=np.float32)
-
-        info = {
-            "P_pv": P_pv, "P_load": P_total_load, "P_grid": self.P_grid,
-            "P_ch": P_ch, "P_dis": P_dis, "SOC": self.SOC, "cost": cost,
-            "unmet_load": unmet_load, "price_per_kwh": price_per_kwh
-        }
-
-        return obs, reward, done, False, info
+        return obs, reward, done, info
 
     def _solve_one_step(self, P_net_without_ad):
         # Heuristic fallback if pulp missing
