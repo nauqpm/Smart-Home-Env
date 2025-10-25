@@ -9,6 +9,7 @@ Usage:
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+from human_behavior import HumanBehavior
 
 try:
     import pulp
@@ -26,6 +27,9 @@ class SmartHomeEnv(gym.Env):
         self.cfg = config
         self.T = len(self.price)
         self.forecast_horizon = forecast_horizon
+
+        self.behavior = None
+
         # === MÔ PHỎNG THỜI TIẾT ===
         self.weather_states = ["sunny", "mild", "cloudy", "rainy", "stormy"]
         self.weather_factors = {
@@ -43,6 +47,7 @@ class SmartHomeEnv(gym.Env):
             "rainy": [0.05, 0.1, 0.25, 0.4, 0.2],
             "stormy": [0.02, 0.08, 0.2, 0.3, 0.4]
         }
+
 
         # Thông số chung
         self.time_step = 1.0  # 1h mỗi bước
@@ -73,6 +78,9 @@ class SmartHomeEnv(gym.Env):
         # === KHỞI TẠO DỮ LIỆU THỜI TIẾT ===
         self.current_weather = "mild"
         self.weather_series = []
+
+        self.behavior = HumanBehavior(T=self.T, weather=self.current_weather)
+
         for t in range(self.T):
             probs = self.weather_transition[self.current_weather]
             self.current_weather = np.random.choice(self.weather_states, p=probs)
@@ -109,7 +117,24 @@ class SmartHomeEnv(gym.Env):
         P_cr_t = self.cfg.get("critical", [0.0] * self.T)[self.t]
         P_ad_t = sum(ad["P_com"] for ad in self.cfg.get("adjustable", []))
         P_load = P_cr_t + P_ad_t + P_su_t + P_si_t
-        P_pv = self.pv[self.t]
+
+        # Điều chỉnh tải theo hành vi con người
+        occ_factor = self.behavior.occupancy[self.t]
+
+        # Giảm tải khi nhà vắng
+        P_load *= (0.5 + 0.5 * occ_factor)
+
+        # Bật thêm tải ngẫu nhiên nếu có người ở nhà
+        if occ_factor > 0.7:
+            device_profile = self.behavior.device_usage
+            if device_profile["tv_prob"][self.t] > 0.5:
+                P_load += 0.1
+            if device_profile["ac_prob"][self.t] > 0.5:
+                P_load += 0.5
+            if device_profile["laptop_prob"][self.t] > 0.5:
+                P_load += 0.08
+            if device_profile["heater_prob"][self.t] > 0.5:
+                P_load += 0.4
 
         # === TÁC ĐỘNG CỦA THỜI TIẾT LÊN PV ===
         weather = self.weather_series[self.t]
