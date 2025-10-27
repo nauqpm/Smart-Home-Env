@@ -3,121 +3,319 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Home 3D Visualizer (Floor Plan)</title>
+    <title>Smart Home 3D Visualizer - v3.2 (Debug)</title>
     <style>
-        /* CSS Giữ nguyên như cũ */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #1a1a2e;
-            color: #f0f0f0;
-            display: flex;
             overflow: hidden;
+            background: #1a1a2e;
+            color: #f0f0f0;
         }
-        #canvas-container { flex-grow: 1; height: 100vh; }
-        #ui-panel {
-            width: 300px;
+        #canvas-container {
+            width: 100vw;
             height: 100vh;
-            background-color: #1c2541;
-            padding: 20px;
-            box-sizing: border-box;
-            overflow-y: auto;
-            border-left: 2px solid #3a506b;
+            position: relative;
+            cursor: grab; /* Thêm con trỏ chuột */
         }
-        h2, h3 { color: #64ffda; border-bottom: 1px solid #3a506b; padding-bottom: 5px; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-        .info-item { background-color: #2a3a5e; padding: 10px; border-radius: 5px; }
-        .info-item strong { display: block; color: #8899a6; font-size: 0.8em; margin-bottom: 5px; }
-        #soc-display { background-color: #2a3a5e; border-radius: 5px; padding: 10px; margin-bottom: 20px; }
-        #battery-bar { width: 100%; height: 20px; background-color: #3a506b; border-radius: 3px; overflow: hidden; }
-        #battery-fill { height: 100%; width: 50%; background: linear-gradient(90deg, #64ffda, #667eea); transition: width 0.3s ease, background 0.3s ease; }
-        #device-status { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
-        .device-icon { font-size: 24px; padding: 8px; border-radius: 5px; background-color: #2a3a5e; transition: all 0.2s ease; }
-        .device-on { color: #64ffda; box-shadow: 0 0 10px #64ffda; }
-        .device-off { color: #506a8e; }
-        #controls { background-color: #2a3a5e; padding: 15px; border-radius: 5px; }
-        #timeline { width: 100%; }
-        .buttons { display: flex; justify-content: space-around; margin-top: 10px; }
-        .buttons button { background-color: #64ffda; border: none; color: #1a1a2e; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .buttons button:hover { background-color: #8affea; }
-        .loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(26, 26, 46, 0.9); color: white; display: flex; justify-content: center; align-items: center; font-size: 2em; z-index: 1000; }
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+
+        #label-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Cho phép click xuyên qua */
+            z-index: 10;
+        }
+
+        /* === CSS CHO NHÃN 3D === */
+        .label {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            color: #ffffff;
+            padding: 4px 8px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            white-space: nowrap; /* Không xuống dòng */
+        }
+        .label-soc { /* Nhãn pin */
+            color: #64ffda;
+            border-color: #64ffda;
+        }
+        .label-pv { /* Nhãn PV */
+            color: #ffd700;
+            border-color: #ffd700;
+        }
+        .label-occupancy { /* Nhãn Người */
+            color: #f0f0f0;
+            font-size: 16px;
+        }
+        /* === KẾT THÚC CSS NHÃN 3D === */
+
+        #ui-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 320px;
+            max-height: 95vh;
+            background: rgba(28, 37, 65, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            z-index: 11; /* Nằm trên label-container */
+        }
+
+        h2, h3 {
+            color: #64ffda;
+            border-bottom: 2px solid #3a506b;
+            padding-bottom: 8px;
+            margin-bottom: 15px;
+        }
+
+        .info-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            border-radius: 8px;
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #8899a6;
+        }
+
+        .info-value {
+            font-weight: bold;
+            font-size: 18px;
+            color: #64ffda;
+        }
+
+        #timestep-display {
+            font-size: 32px;
+            font-weight: bold;
+            color: #64ffda;
+            text-align: center;
+            margin: 10px 0;
+            text-shadow: 0 0 10px rgba(100, 255, 218, 0.5);
+        }
+
+        /* Battery Display */
+        #battery-bar {
+            width: 100%;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        #battery-fill {
+            height: 100%;
+            width: 50%;
+            background: linear-gradient(90deg, #64ffda, #667eea);
+            border-radius: 12px;
+            transition: all 0.5s ease;
+        }
+
+        /* Device Status Grid */
+        #device-status {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .device-icon {
+            font-size: 32px;
+            padding: 12px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .device-on {
+            color: #64ffda;
+            background: rgba(100, 255, 218, 0.2);
+            box-shadow: 0 0 20px rgba(100, 255, 218, 0.4);
+        }
+
+        .device-off {
+            color: #506a8e;
+        }
+
+        /* Controls */
+        #controls {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+
+        #timeline {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, #667eea, #764ba2);
+            outline: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+        }
+
+        #timeline::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #64ffda;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(100, 255, 218, 0.8);
+        }
+
+        .buttons {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 12px;
+            gap: 8px;
+        }
+
+        .buttons button {
+            flex: 1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .buttons button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            color: white;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 40px 80px;
+            border-radius: 15px;
+            z-index: 1000;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
-
     <div id="canvas-container"></div>
+    <div id="label-container"></div>
     <div id="ui-panel">
-        <h2>Smart Home 3D</h2>
+        <h2>🏠 Smart Home 3D</h2>
+        <div id="timestep-display">Giờ: 0</div>
         <div class="info-item">
-            <strong>THỜI GIAN: <span id="timestep-display">Giờ: 0</span></strong>
-            <div>Thời tiết: <span id="weather">---</span></div>
-            <div>Ở nhà: <span id="occupancy">0/4</span></div>
+            <span class="info-label">🌦️ Thời tiết</span>
+            <span class="info-value" id="weather">---</span>
         </div>
-        <h3>Pin (Battery)</h3>
-        <div id="soc-display">
-            <strong>SOC: <span id="soc">50%</span></strong>
-            <div id="battery-bar"><div id="battery-fill"></div></div>
+        <div class="info-item">
+            <span class="info-label">👥 Người trong nhà</span>
+            <span class="info-value" id="occupancy">0/4</span>
         </div>
-        <h3>Trạng thái năng lượng</h3>
-        <div class="info-grid">
-            <div class="info-item"><strong>PV (kW)</strong><span id="pv">0.00</span></div>
-            <div class="info-item"><strong>Load (kW)</strong><span id="load">0.00</span></div>
-            <div class="info-item"><strong>Grid (kW)</strong><span id="grid">0.00</span></div>
+        <h3>🔋 Pin năng lượng</h3>
+        <div class="info-item">
+            <span class="info-label">SOC</span>
+            <span class="info-value" id="soc">50%</span>
         </div>
-        <h3>Thiết bị (Devices)</h3>
+        <div id="battery-bar"><div id="battery-fill"></div></div>
+        <h3>⚡ Năng lượng</h3>
+        <div class="info-item">
+            <span class="info-label">☀️ PV</span>
+            <span class="info-value" style="color: #ffd700;" id="pv">0.00 kW</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">📊 Tải</span>
+            <span class="info-value" style="color: #ff8c00;" id="load">0.00 kW</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">🔌 Lưới</span>
+            <span class="info-value" style="color: #ff6b6b;" id="grid">0.00 kW</span>
+        </div>
+        <h3>🔌 Thiết bị</h3>
         <div id="device-status">
-            <span id="light-icon" class="device-icon device-off">💡</span>
-            <span id="ac-icon" class="device-icon device-off">❄️</span>
-            <span id="heater-icon" class="device-icon device-off">🔥</span>
-            <span id="tv-icon" class="device-icon device-off">📺</span>
-            <span id="washing-icon" class="device-icon device-off">🧺</span>
-            <span id="ev-icon" class="device-icon device-off">🚗</span>
+            <div class="device-icon device-off" id="light-icon" data-device="lights">💡</div>
+            <div class="device-icon device-off" id="fridge-icon" data-device="fridge">🧊</div>
+            <div class="device-icon device-off" id="tv-icon" data-device="tv">📺</div>
+            <div class="device-icon device-off" id="ac-icon" data-device="ac">❄️</div>
+            <div class="device-icon device-off" id="heater-icon" data-device="heater">🔥</div>
+            <div class="device-icon device-off" id="washing-icon" data-device="washing_machine">🧺</div>
+            <div class="device-icon device-off" id="dishwasher-icon" data-device="dishwasher">🍽️</div>
+            <div class="device-icon device-off" id="laptop-icon" data-device="laptop">💻</div>
+            <div class="device-icon device-off" id="ev-icon" data-device="ev_charger">🚗</div>
         </div>
-        <h3>Điều khiển (Controls)</h3>
+        <h3>🎛️ Điều khiển</h3>
         <div id="controls">
-            <input type="range" min="0" max="23" value="0" class="slider" id="timeline">
+            <input type="range" min="0" max="23" value="0" id="timeline">
             <div class="buttons">
-                <button id="play-btn">Play</button>
-                <button id="pause-btn">Pause</button>
-                <button id="reset-btn">Reset</button>
+                <button id="play-btn">▶️ Play</button>
+                <button id="pause-btn">⏸️ Pause</button>
+                <button id="reset-btn">🔄 Reset</button>
             </div>
         </div>
     </div>
-    <div class="loading" id="loading">Đang tải mô phỏng...</div>
+    <div class="loading" id="loading">⏳ Đang tải mô phỏng...</div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
-    <script src="https://unpkg.com/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
 
     <script>
-        // Biến toàn cục
-        let SIMULATION_DATA = {};
-        let scene, camera, renderer, sunLight, ambientLight;
-        let houseGroup, ground;
-        let people = [];
-        let batteryGroup, batteryFill, socText;
-        let solarPanel;
-        let rain, rainMaterial, lightningFlash; // Cho mưa và sấm sét
-        let devices3D = {};
+        // ==================== THREE.JS SETUP ====================
+        let scene, camera, renderer, controls;
+        let labelRenderer;
+        let houseGroup, devices3D = {}, devices3D_labels = {}; // Lưu trữ mô hình VÀ nhãn
+        let batteryGroup, batteryFill, batteryLabelElement; // Nhãn cho pin
+        let solarPanel, solarPanelLabelElement; // Nhãn cho PV
+        let occupancyLabelElement; // Nhãn cho số người
 
-        // Biến trạng thái
+        let sun3D, sunGlow, cloudGroup = [], rain, lightningFlash;
+        let ambientLight, sunLight, hemisphereLight;
+
         let currentTime = 0;
         let isPlaying = false;
-        let animationSpeed = 1;
+        let simulationInterval = null;
+        let SIMULATION_DATA = {};
+        const ui = {};
 
-        // Hàm khởi tạo
+        // Run Initialization
+        init();
+
         function init() {
             // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a2e);
-            scene.fog = new THREE.Fog(0x1a1a2e, 20, 100);
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.Fog(0x87ceeb, 40, 100);
 
-            // Camera (SỬA LỖI: Đặt camera cao hơn để xem mặt bằng)
+            // Camera
             const container = document.getElementById('canvas-container');
-            camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
-            camera.position.set(0, 18, 15); // Nhìn từ trên cao, góc chéo
-            camera.lookAt(0, 0, 0); // Nhìn vào trung tâm
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 200);
+            camera.position.set(20, 18, 20);
+            camera.lookAt(0, 0, 0);
 
             // Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -126,468 +324,75 @@
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             container.appendChild(renderer.domElement);
 
+            // OrbitControls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 10;
+            controls.maxDistance = 80;
+            controls.maxPolarAngle = Math.PI / 2.1;
+
+            // Label Renderer
+            const labelContainer = document.getElementById('label-container');
+            labelRenderer = new THREE.CSS2DRenderer();
+            labelRenderer.setSize(container.clientWidth, container.clientHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0px';
+            labelContainer.appendChild(labelRenderer.domElement);
+
             // Lighting
-            ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // Tăng sáng môi trường
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
-            sunLight = new THREE.DirectionalLight(0xffffff, 1.0); // Nắng
-            sunLight.position.set(20, 30, 20);
+            hemisphereLight = new THREE.HemisphereLight(0xbad8ff, 0x3a7d44, 0.5);
+            scene.add(hemisphereLight);
+            sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            sunLight.position.set(30, 40, 20);
             sunLight.castShadow = true;
-            sunLight.shadow.mapSize.width = 4096;
-            sunLight.shadow.mapSize.height = 4096;
-            sunLight.shadow.camera.near = 0.5;
-            sunLight.shadow.camera.far = 100;
-            sunLight.shadow.camera.left = -30;
-            sunLight.shadow.camera.right = 30;
-            sunLight.shadow.camera.top = 30;
-            sunLight.shadow.camera.bottom = -30;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.left = -25;
+            sunLight.shadow.camera.right = 25;
+            sunLight.shadow.camera.top = 25;
+            sunLight.shadow.camera.bottom = -25;
             scene.add(sunLight);
 
-            // NÂNG CẤP: Ánh sáng sấm sét (ban đầu tắt)
-            lightningFlash = new THREE.PointLight(0xccccff, 0, 100, 2);
-            lightningFlash.position.set(0, 30, 0);
-            scene.add(lightningFlash);
-
             // Ground
-            const groundGeometry = new THREE.PlaneGeometry(60, 60);
-            const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x2d4a3e, roughness: 0.8 });
-            ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            const groundGeo = new THREE.PlaneGeometry(60, 60);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a7d44, roughness: 0.8 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // Tải Font và tạo mô hình
-            loadFontAndModels();
+            // Helpers
+            const gridHelper = new THREE.GridHelper(60, 60, 0x555555, 0x555555);
+            gridHelper.position.y = 0.01;
+            scene.add(gridHelper);
+            const axesHelper = new THREE.AxesHelper(5);
+            axesHelper.position.y = 0.01;
+            scene.add(axesHelper);
 
-            // Tạo hiệu ứng mưa (SỬA LỖI)
-            createRainEffect();
+            // Create 3D elements
+            createWeatherSystem();
+            createHouse();
+            createBattery();
+            createSolarPanel();
+            createGridConnection();
+            createAllDevices(); // Bắt đầu tải mô hình
 
-            // Gắn các sự kiện
+            // Setup controls
+            cacheUIElements();
             setupControls();
             window.addEventListener('resize', onWindowResize);
 
-            // Tải dữ liệu
+            // Tải JSON ngay lập tức
             loadDataAndStart();
+            animate();
         }
 
-        function loadFontAndModels() {
-            const fontLoader = new THREE.FontLoader();
-            fontLoader.load('https://unpkg.com/three@0.128.0/examples/fonts/helvetiker_regular.typeface.json', (font) => {
-                // NÂNG CẤP: Xây nhà mặt bằng (không mái)
-                createFloorPlanHouse();
-                // NÂNG CẤP: Đặt thiết bị vào đúng phòng
-                createDevicesInHouse();
-
-                createBattery(font);
-                createPeople();
-            }, undefined, (error) => {
-                console.error("Lỗi tải font 3D:", error);
-                createFloorPlanHouse();
-                createDevicesInHouse();
-                createBattery();
-                createPeople();
-            });
-        }
-
-        // ==========================================================
-        // NÂNG CẤP: XÂY NHÀ MẶT BẰNG (KHÔNG MÁI)
-        // ==========================================================
-        function createFloorPlanHouse() {
-            houseGroup = new THREE.Group();
-            scene.add(houseGroup);
-
-            const wallHeight = 3.0; // Chiều cao tường
-            const wallThick = 0.2; // Độ dày tường
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0xdecba4 }); // Màu sàn gỗ
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 }); // Màu tường trắng
-
-            // 1. Sàn nhà (Base)
-            const floor = new THREE.Mesh(
-                new THREE.BoxGeometry(16, 0.2, 10), // Rộng 16, Sâu 10
-                floorMat
-            );
-            floor.receiveShadow = true;
-            houseGroup.add(floor);
-
-            // 2. Tường (Tọa độ (x, y, z))
-            // (Hàm trợ giúp tạo tường)
-            function createWall(w, h, d, x, y, z) {
-                const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-                wall.position.set(x, y, z);
-                wall.castShadow = true;
-                wall.receiveShadow = true;
-                houseGroup.add(wall);
-                return wall;
-            }
-
-            // Tường bao
-            createWall(16, wallHeight, wallThick, 0, wallHeight/2, 5); // Tường sau
-            createWall(16, wallHeight, wallThick, 0, wallHeight/2, -5); // Tường trước
-            createWall(wallThick, wallHeight, 10, -8, wallHeight/2, 0); // Tường trái
-            createWall(wallThick, wallHeight, 10, 8, wallHeight/2, 0); // Tường phải
-
-            // Tường ngăn
-            // (Mô phỏng 3 phòng ngủ + 1 P.Khách/Bếp + 1 P.Tắm)
-            // Tường dọc
-            createWall(wallThick, wallHeight, 4, -3, wallHeight/2, 3); // Tường P.Ngủ 1
-            createWall(wallThick, wallHeight, 4, 1, wallHeight/2, 3);  // Tường P.Ngủ 2
-            createWall(wallThick, wallHeight, 4, 4, wallHeight/2, 3);  // Tường P.Tắm
-
-            // Tường ngang
-            createWall(16, wallHeight, wallThick, 0, wallHeight/2, 1); // Tường ngăn ngang
-            createWall(5, wallHeight, wallThick, 5.5, wallHeight/2, -2); // Tường P.Ngủ 3
-        }
-
-        // ==========================================================
-        // NÂNG CẤP: ĐẶT THIẾT BỊ VÀO PHÒNG
-        // ==========================================================
-        function createDevicesInHouse() {
-            // (Vật liệu phát sáng)
-            const emissiveMat = (color) => new THREE.MeshStandardMaterial({ color: color, emissive: 0x000000 });
-
-            // TV (Đặt ở P.Khách)
-            const tv = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.8, 0.1), emissiveMat(0x34495e));
-            tv.position.set(-5.5, 1, -4.9); // Áp tường trước
-            devices3D.tv = tv;
-
-            // AC (Điều hòa) (Đặt ở P.Ngủ 1)
-            const ac = new THREE.Mesh(new THREE.BoxGeometry(1, 0.4, 0.3), emissiveMat(0xecf0f1));
-            ac.position.set(-5.5, 2.5, 4.9); // Áp tường sau
-            devices3D.ac = ac;
-
-            // Đèn (Đặt ở trần P.Khách)
-            const lightBulb = new THREE.Mesh(
-                new THREE.SphereGeometry(0.2, 16, 16),
-                new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.8 })
-            );
-            lightBulb.position.set(-5.5, 2.8, -2); // Trần P.Khách
-            devices3D.lights = lightBulb;
-
-            // Máy sưởi (Đặt ở P.Ngủ 2)
-            const heater = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.3), emissiveMat(0xc0392b));
-            heater.position.set(-1, 0.5, 4.8); // Góc P.Ngủ 2
-            devices3D.heater = heater;
-
-            // Máy giặt (Đặt ở P.Tắm)
-            const washingMachine = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.8), emissiveMat(0x95a5a6));
-            washingMachine.position.set(2.5, 0.5, 4); // Góc P.Tắm
-            devices3D.washing_machine = washingMachine;
-
-            // Thêm tất cả thiết bị vào houseGroup
-            Object.values(devices3D).forEach(device => {
-                device.visible = false; // Ban đầu ẩn
-                device.castShadow = true;
-                houseGroup.add(device);
-            });
-
-            // Sạc EV (Đặt bên ngoài, bên phải nhà)
-            const evCharger = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.2, 0.3), emissiveMat(0x2c3e50));
-            evCharger.position.set(8.5, 0.6, 0); // Gắn tường ngoài bên phải
-            evCharger.visible = false;
-            devices3D.ev_charger = evCharger;
-            scene.add(evCharger); // Thêm vào scene (ngoài houseGroup)
-
-            // Solar Panel (Tấm pin mặt trời) (Đặt trên bãi cỏ)
-            solarPanel = new THREE.Mesh(
-                new THREE.BoxGeometry(4, 0.2, 3),
-                new THREE.MeshStandardMaterial({ color: 0x1e3a8a, metalness: 0.8, roughness: 0.2, emissive: 0x000000 })
-            );
-            solarPanel.position.set(12, 0.1, 0); // Đặt ngoài sân
-            solarPanel.rotation.x = -Math.PI / 8;
-            solarPanel.castShadow = true;
-            scene.add(solarPanel);
-        }
-
-        function createBattery(font) {
-            batteryGroup = new THREE.Group();
-            batteryGroup.position.set(-10, 1, 0); // Đặt bên trái nhà
-            scene.add(batteryGroup);
-
-            const batteryOutline = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 0.5), new THREE.MeshStandardMaterial({ color: 0x2ecc71 }));
-            batteryOutline.castShadow = true;
-            batteryGroup.add(batteryOutline);
-
-            batteryFill = new THREE.Mesh(
-                new THREE.BoxGeometry(0.9, 1.9, 0.4),
-                new THREE.MeshStandardMaterial({ color: 0x64ffda, emissive: 0x64ffda, emissiveIntensity: 0.3 })
-            );
-            batteryGroup.add(batteryFill);
-
-            if (font) {
-                const textGeometry = new THREE.TextGeometry('...%', { font: font, size: 0.3, height: 0.05 });
-                textGeometry.computeBoundingBox();
-                socText = new THREE.Mesh(textGeometry, new THREE.MeshBasicMaterial({ color: 0xffffff }));
-                socText.position.set(-0.4, 1.2, 0.26);
-                batteryGroup.add(socText);
-            }
-        }
-
-        function createPeople() {
-            for (let i = 0; i < 4; i++) {
-                const person = new THREE.Mesh(
-                    new THREE.CylinderGeometry(0.2, 0.2, 1.2, 8),
-                    new THREE.MeshStandardMaterial({ color: 0x3498db })
-                );
-                // Đặt họ ở P.Khách
-                person.position.set(-6 + Math.random()*2, 0.6, -2 + Math.random()*2);
-                person.visible = false;
-                person.castShadow = true;
-                houseGroup.add(person);
-                people.push(person);
-            }
-        }
-
-        // ==========================================================
-        // SỬA LỖI: HIỆU ỨNG MƯA
-        // ==========================================================
-        function createRainEffect() {
-            const rainCount = 10000; // Tăng số lượng hạt
-            const posArr = new Float32Array(rainCount * 3);
-            const velArr = new Float32Array(rainCount); // Mảng vận tốc rơi
-
-            for (let i = 0; i < rainCount; i++) {
-                posArr[i * 3 + 0] = (Math.random() * 40 - 20); // x
-                posArr[i * 3 + 1] = (Math.random() * 30 + 5);  // y
-                posArr[i * 3 + 2] = (Math.random() * 40 - 20); // z
-                velArr[i] = 0.1 + Math.random() * 0.2; // Tốc độ rơi ngẫu nhiên
-            }
-
-            const rainGeometry = new THREE.BufferGeometry();
-            rainGeometry.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
-            rainGeometry.setAttribute('velocity', new THREE.BufferAttribute(velArr, 1)); // Lưu tốc độ
-
-            // Dùng vật liệu cơ bản, không cần texture
-            rainMaterial = new THREE.PointsMaterial({
-                color: 0xaaaaaa,
-                size: 0.1, // Kích thước hạt
-                transparent: true,
-                opacity: 0.7
-            });
-            rain = new THREE.Points(rainGeometry, rainMaterial);
-            rain.visible = false; // Mặc định ẩn
-            scene.add(rain);
-        }
-
-        // ==========================================================
-        // HÀM CẬP NHẬT CHÍNH (UPDATE VISUALIZATION)
-        // ==========================================================
-        function updateVisualization(timeIndex) {
-            if (!SIMULATION_DATA || !SIMULATION_DATA.timesteps) return;
-            const data = SIMULATION_DATA;
-            timeIndex = Math.max(0, Math.min(timeIndex, data.timesteps.length - 1));
-
-            // Lấy dữ liệu của timestep hiện tại
-            const getEl = (id) => document.getElementById(id);
-            const currentDevices = data.devices[timeIndex];
-            const currentPV = data.pv[timeIndex];
-            const currentLoad = data.load[timeIndex];
-            const currentGrid = data.grid[timeIndex];
-            const currentSOC = data.soc[timeIndex];
-            const currentOccupancy = data.occupancy[timeIndex];
-            const currentWeather = data.weather[timeIndex];
-
-            // 1. Cập nhật Bảng điều khiển (UI Panel)
-            getEl('timestep-display').textContent = `Giờ: ${timeIndex}`;
-            getEl('weather').textContent = currentWeather;
-            getEl('occupancy').textContent = Math.round(currentOccupancy * 4) + '/4';
-            getEl('soc').textContent = Math.round(currentSOC * 100) + '%';
-
-            const batteryFillEl = getEl('battery-fill');
-            batteryFillEl.style.width = (currentSOC * 100) + '%';
-            if (currentSOC > 0.6) batteryFillEl.style.background = 'linear-gradient(90deg, #64ffda, #667eea)';
-            else if (currentSOC > 0.3) batteryFillEl.style.background = 'linear-gradient(90deg, #ffd700, #ff8c00)';
-            else batteryFillEl.style.background = 'linear-gradient(90deg, #ff6b6b, #c92a2a)';
-
-            getEl('pv').textContent = currentPV.toFixed(2);
-            getEl('load').textContent = currentLoad.toFixed(2);
-            getEl('grid').textContent = currentGrid.toFixed(2);
-
-            // 2. Cập nhật Pin 3D (Màu sắc & Chữ)
-            if (batteryFill) {
-                const newScale = Math.max(0.01, currentSOC);
-                batteryFill.scale.y = newScale;
-                batteryFill.position.y = (newScale * 1.9 / 2) - (1.9 / 2);
-
-                if (currentSOC > 0.6) { batteryFill.material.color.setHex(0x64ffda); batteryFill.material.emissive.setHex(0x64ffda); }
-                else if (currentSOC > 0.3) { batteryFill.material.color.setHex(0xffd700); batteryFill.material.emissive.setHex(0xffd700); }
-                else { batteryFill.material.color.setHex(0xff6b6b); batteryFill.material.emissive.setHex(0xff6b6b); }
-            }
-            if (socText) {
-                const newText = `${Math.round(currentSOC * 100)}%`;
-                socText.geometry.dispose();
-                socText.geometry = new THREE.TextGeometry(newText, { font: socText.geometry.parameters.font, size: 0.3, height: 0.05 });
-                socText.geometry.computeBoundingBox();
-                socText.position.x = - (socText.geometry.boundingBox.max.x - socText.geometry.boundingBox.min.x) / 2;
-            }
-
-            // 3. Cập nhật Người 3D
-            const numPeople = Math.round(currentOccupancy * 4);
-            people.forEach((person, i) => {
-                person.visible = i < numPeople;
-            });
-
-            // 4. Cập nhật Thiết bị 3D (Bật/Tắt và Phát sáng)
-            for (const deviceKey in devices3D) {
-                if (devices3D.hasOwnProperty(deviceKey) && currentDevices.hasOwnProperty(deviceKey)) {
-                    const deviceMesh = devices3D[deviceKey];
-                    const isOn = currentDevices[deviceKey];
-                    deviceMesh.visible = isOn; // Ẩn/hiện
-
-                    if (deviceMesh.material.emissive) {
-                        let glowColor = 0x64ffda; // Sáng xanh
-                        if (deviceKey === 'heater') glowColor = 0xff4500; // Sưởi sáng đỏ
-                        if (deviceKey === 'tv') glowColor = 0x0000ff; // TV sáng xanh dương
-
-                        deviceMesh.material.emissive.setHex(isOn ? glowColor : 0x000000);
-                        deviceMesh.material.emissiveIntensity = isOn ? 1.0 : 0;
-                    }
-                }
-            }
-
-            // Cập nhật icon 2D
-            updateDeviceStatus('light-icon', currentDevices.lights);
-            updateDeviceStatus('ac-icon', currentDevices.ac);
-            updateDeviceStatus('heater-icon', currentDevices.heater);
-            updateDeviceStatus('tv-icon', currentDevices.tv);
-            updateDeviceStatus('washing-icon', currentDevices.washing_machine);
-            updateDeviceStatus('ev-icon', currentDevices.ev_charger);
-
-            // 5. Cập nhật Môi trường (Thời tiết)
-            if (solarPanel) {
-                solarPanel.material.emissive.setHex(currentPV > 0.1 ? 0x4444ff : 0x000000); // Tấm pin sáng xanh
-            }
-
-            let skyColor, fogColor, rainVisible = false;
-            let ambientIntensity = 0.5;
-            let sunIntensity = 1.0;
-
-            switch (currentWeather) {
-                case "sunny":
-                    skyColor = 0x87ceeb; fogColor = 0x87ceeb;
-                    ambientIntensity = 0.6; sunIntensity = 1.2;
-                    break;
-                case "mild":
-                    skyColor = 0xa7d9f7; fogColor = 0xa7d9f7;
-                    ambientIntensity = 0.5; sunIntensity = 0.8;
-                    break;
-                case "cloudy":
-                    skyColor = 0x99a9b7; fogColor = 0x99a9b7;
-                    ambientIntensity = 0.4; sunIntensity = 0.5;
-                    break;
-                case "rainy":
-                    skyColor = 0x6c7a89; fogColor = 0x6c7a89;
-                    ambientIntensity = 0.3; sunIntensity = 0.3;
-                    rainVisible = true;
-                    break;
-                case "stormy":
-                    skyColor = 0x3d4a5d; fogColor = 0x3d4a5d; // Tối sầm
-                    ambientIntensity = 0.1; sunIntensity = 0.1; // Rất tối
-                    rainVisible = true;
-                    // Sấm sét sẽ được xử lý trong animate()
-                    break;
-                default:
-                    skyColor = 0x1a1a2e; fogColor = 0x1a1a2e;
-                    ambientIntensity = 0.4; sunIntensity = 0.4;
-                    break;
-            }
-            scene.background.setHex(skyColor);
-            scene.fog.color.setHex(fogColor);
-            ambientLight.intensity = ambientIntensity;
-            sunLight.intensity = sunIntensity;
-            if (rain) rain.visible = rainVisible;
-        }
-
-        // (Hàm này giữ nguyên)
-        function updateDeviceStatus(iconId, isOn) {
-            const icon = document.getElementById(iconId);
-            if (!icon) return;
-            if (isOn) {
-                icon.classList.remove('device-off');
-                icon.classList.add('device-on');
-            } else {
-                icon.classList.remove('device-on');
-                icon.classList.add('device-off');
-            }
-        }
-
-        // ==========================================================
-        // VÒNG LẶP ANIMATION (THÊM MƯA RƠI VÀ SẤM SÉT)
-        // ==========================================================
-        function animate() {
-            requestAnimationFrame(animate);
-
-            const timeFloor = Math.floor(currentTime);
-
-            if (isPlaying) {
-                currentTime += 0.02 * animationSpeed;
-                if (currentTime >= (SIMULATION_DATA.timesteps?.length || 24)) {
-                    currentTime = 0;
-                }
-                document.getElementById('timeline').value = timeFloor;
-                updateVisualization(timeFloor);
-            }
-
-            // Hiệu ứng mưa rơi (SỬA LỖI: Cập nhật Y)
-            if (rain && rain.visible) {
-                const positions = rain.geometry.attributes.position.array;
-                const velocities = rain.geometry.attributes.velocity.array;
-                const count = positions.length / 3;
-
-                for (let i = 0; i < count; i++) {
-                    positions[i * 3 + 1] -= velocities[i]; // Rơi theo tốc độ
-                    if (positions[i * 3 + 1] < -5) {
-                        positions[i * 3 + 1] = 30; // Reset lên cao
-                    }
-                }
-                rain.geometry.attributes.position.needsUpdate = true; // Rất quan trọng
-            }
-
-            // NÂNG CẤP: Hiệu ứng sấm sét
-            if (lightningFlash) {
-                if (rain && rain.visible && SIMULATION_DATA.weather[timeFloor] === 'stormy') {
-                    if (Math.random() > 0.97) { // 3% cơ hội mỗi frame
-                        lightningFlash.intensity = 3.0; // Sáng bừng
-                    }
-                }
-                lightningFlash.intensity *= 0.92; // Giảm dần
-            }
-
-            renderer.render(scene, camera);
-        }
-
-        // (Các hàm xử lý sự kiện và tải dữ liệu giữ nguyên)
-        function setupControls() {
-            const timeline = document.getElementById('timeline');
-            const playBtn = document.getElementById('play-btn');
-            const pauseBtn = document.getElementById('pause-btn');
-            const resetBtn = document.getElementById('reset-btn');
-
-            if (timeline) timeline.addEventListener('input', (e) => {
-                currentTime = parseInt(e.target.value);
-                updateVisualization(currentTime);
-            });
-            if (playBtn) playBtn.addEventListener('click', () => { isPlaying = true; });
-            if (pauseBtn) pauseBtn.addEventListener('click', () => { isPlaying = false; });
-            if (resetBtn) resetBtn.addEventListener('click', () => {
-                currentTime = 0;
-                if (timeline) timeline.value = 0;
-                isPlaying = false;
-                updateVisualization(0);
-            });
-        }
-
-        function onWindowResize() {
-            const container = document.getElementById('canvas-container');
-            if (container) {
-                const width = container.clientWidth;
-                const height = container.clientHeight;
-                camera.aspect = width / height;
-                camera.updateProjectionMatrix();
-                renderer.setSize(width, height);
-            }
-        }
-
+        // ==================== DATA LOADING ====================
         function loadDataAndStart() {
-            fetch('simulation_data.json')
+            fetch('simulation_data.json?t=' + new Date().getTime())
                 .then(response => {
                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}.`);
                     return response.json();
@@ -596,8 +401,7 @@
                     SIMULATION_DATA = data;
                     document.getElementById('timeline').max = data.timesteps.length - 1;
                     document.getElementById('loading').style.display = 'none';
-                    updateVisualization(0);
-                    animate();
+                    updateVisualization(0); // Cập nhật lần đầu
                 })
                 .catch(e => {
                     console.error('Lỗi tải simulation data:', e);
@@ -605,8 +409,458 @@
                 });
         }
 
-        // Khởi chạy
-        init();
+        // ==================== WEATHER SYSTEM ====================
+        function createWeatherSystem() {
+            const sunGeo = new THREE.SphereGeometry(4, 32, 32);
+            const sunMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            sun3D = new THREE.Mesh(sunGeo, sunMat);
+            sun3D.position.set(40, 35, -30);
+            scene.add(sun3D);
+            const glowGeo = new THREE.SphereGeometry(4.5, 32, 32);
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.3 });
+            sunGlow = new THREE.Mesh(glowGeo, glowMat);
+            sun3D.add(sunGlow);
+            for (let i = 0; i < 15; i++) {
+                const cloud = createCloud();
+                cloud.position.set(Math.random() * 50 - 25, 15 + Math.random() * 10, Math.random() * 50 - 25);
+                cloud.visible = false;
+                cloudGroup.push(cloud);
+                scene.add(cloud);
+            }
+            const rainCount = 5000;
+            const rainGeo = new THREE.BufferGeometry();
+            const positions = new Float32Array(rainCount * 3);
+            const velocities = new Float32Array(rainCount);
+            for (let i = 0; i < rainCount; i++) {
+                positions[i * 3] = Math.random() * 50 - 25;
+                positions[i * 3 + 1] = Math.random() * 40;
+                positions[i * 3 + 2] = Math.random() * 50 - 25;
+                velocities[i] = 0.2 + Math.random() * 0.3;
+            }
+            rainGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            rainGeo.setAttribute('velocity', new THREE.BufferAttribute(velocities, 1));
+            const rainMat = new THREE.PointsMaterial({ color: 0xaaaaaa, size: 0.15, transparent: true, opacity: 0.6 });
+            rain = new THREE.Points(rainGeo, rainMat);
+            rain.visible = false;
+            scene.add(rain);
+            lightningFlash = new THREE.PointLight(0xccccff, 0, 60);
+            lightningFlash.position.set(0, 30, 0);
+            scene.add(lightningFlash);
+        }
+
+        function createCloud() {
+            const cloud = new THREE.Group();
+            const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+            for (let i = 0; i < 3; i++) {
+                const size = 1.5 + Math.random() * 1;
+                const sphere = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 12), cloudMat);
+                sphere.position.set((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 2);
+                cloud.add(sphere);
+            }
+            return cloud;
+        }
+
+        // ==================== HOUSE ====================
+        function createHouse() {
+            houseGroup = new THREE.Group();
+            scene.add(houseGroup);
+            const floorGeo = new THREE.BoxGeometry(12, 0.3, 10);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0xd4a574 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.receiveShadow = true;
+            houseGroup.add(floor);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5deb3, transparent: true, opacity: 0.2 });
+            const wallHeight = 3.5;
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(12, wallHeight, 0.2), wallMat);
+            backWall.position.set(0, wallHeight/2, -5);
+            backWall.castShadow = true;
+            backWall.receiveShadow = true;
+            houseGroup.add(backWall);
+            const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, wallHeight, 10), wallMat);
+            leftWall.position.set(-6, wallHeight/2, 0);
+            leftWall.castShadow = true;
+            houseGroup.add(leftWall);
+            const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, wallHeight, 10), wallMat);
+            rightWall.position.set(6, wallHeight/2, 0);
+            rightWall.castShadow = true;
+            houseGroup.add(rightWall);
+            const divWall1 = new THREE.Mesh(new THREE.BoxGeometry(0.15, wallHeight, 6), wallMat);
+            divWall1.position.set(-2, wallHeight/2, 2);
+            houseGroup.add(divWall1);
+            const divWall2 = new THREE.Mesh(new THREE.BoxGeometry(6, wallHeight, 0.15), wallMat);
+            divWall2.position.set(1, wallHeight/2, 0);
+            houseGroup.add(divWall2);
+            const roofGeo = new THREE.ConeGeometry(9, 2.5, 4);
+            const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, transparent: true, opacity: 0.3 });
+            const roof = new THREE.Mesh(roofGeo, roofMat);
+            roof.position.y = wallHeight + 1.25;
+            roof.rotation.y = Math.PI / 4;
+            roof.castShadow = true;
+            houseGroup.add(roof);
+            const doorGeo = new THREE.BoxGeometry(1.2, 2.2, 0.1);
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x654321 });
+            const door = new THREE.Mesh(doorGeo, doorMat);
+            door.position.set(0, 1.1, 4.9);
+            houseGroup.add(door);
+            const windowGeo = new THREE.BoxGeometry(1.2, 1.2, 0.1);
+            const windowMat = new THREE.MeshStandardMaterial({ color: 0x87ceeb, transparent: true, opacity: 0.7, emissive: 0x000000 });
+            const win1 = new THREE.Mesh(windowGeo, windowMat.clone());
+            win1.position.set(-3, 2, 4.9);
+            houseGroup.add(win1);
+            const win2 = new THREE.Mesh(windowGeo, windowMat.clone());
+            win2.position.set(3, 2, 4.9);
+            houseGroup.add(win2);
+            const houseEdges = new THREE.EdgesGeometry(new THREE.BoxGeometry(12, 3.5, 10));
+            const edgeMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 1 });
+            const houseWireframe = new THREE.LineSegments(houseEdges, edgeMaterial);
+            houseWireframe.position.y = 3.5 / 2;
+            houseGroup.add(houseWireframe);
+
+            // Thêm nhãn "Số người"
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'label label-occupancy';
+            labelDiv.textContent = 'Số người: 0';
+            occupancyLabelElement = labelDiv; // Lưu lại để cập nhật
+            const occupancyLabel = new THREE.CSS2DObject(labelDiv);
+            occupancyLabel.position.set(-6.5, 2, 0); // Đặt bên cạnh tường trái
+            houseGroup.add(occupancyLabel);
+        }
+
+        // ==================== HÀM TẠO NHÃN 3D ====================
+        function createDeviceLabel(text, name) {
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'label';
+            labelDiv.textContent = text;
+            labelDiv.style.visibility = 'hidden'; // Ẩn ban đầu
+
+            const label = new THREE.CSS2DObject(labelDiv);
+            devices3D_labels[name] = label; // Lưu nhãn lại
+            return label;
+        }
+
+        // ==================== TẢI MÔ HÌNH 3D (.GLB) - CÓ DEBUG ====================
+        function createAllDevices() {
+            const gltfLoader = new THREE.GLTFLoader();
+            const modelBaseUrl = "https://poly.pizza/m/";
+
+            // Hàm xử lý lỗi chi tiết
+            const onLoadError = (deviceKey, url, error) => {
+                console.error(`❌ Lỗi tải mô hình GLB cho '${deviceKey}' từ URL: ${url}`, error);
+                // Tạo khối vuông màu đỏ thay thế
+                 const errorGeo = new THREE.BoxGeometry(0.5, 1, 0.5); // Cao hơn để dễ thấy
+                 const errorMat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.7});
+                 const errorMesh = new THREE.Mesh(errorGeo, errorMat);
+                 // Đặt vị trí placeholder tương ứng (ước lượng)
+                 const positions = {
+                     'fridge': [-5, 0.65, -4], 'tv': [-4.5, 1.2, -4.85], 'ac': [4, 3.1, -4.8],
+                     'heater': [4, 0.4, 3.5], 'washing_machine': [-4.5, 0.7, 3.5],
+                     'dishwasher': [-5.2, 0.6, -2.5], 'laptop': [-4, 0.85, 0.5],
+                     'ev_charger_box': [7.5, 0.8, 3], 'ev_car': [9.5, 0.65, 2.5]
+                 };
+                 if (positions[deviceKey]) {
+                     errorMesh.position.set(...positions[deviceKey]);
+                     // Chỉ thêm vào houseGroup nếu là thiết bị trong nhà
+                     if (!deviceKey.startsWith('ev')) {
+                        houseGroup.add(errorMesh);
+                     } else {
+                        scene.add(errorMesh); // EV ở ngoài scene
+                     }
+                     console.log(`-> Đã thêm placeholder màu đỏ cho ${deviceKey}`);
+                 }
+            };
+
+            // Hàm tải chung
+            function loadDevice(key, urlPath, scale, position, rotationY = 0, labelText, labelOffsetY = 1.0) {
+                const fullUrl = modelBaseUrl + urlPath;
+                gltfLoader.load(fullUrl, (gltf) => {
+                    console.log(`✅ Tải thành công: ${key} từ ${fullUrl}`);
+                    const model = gltf.scene;
+                    model.scale.set(scale, scale, scale);
+                    model.position.set(...position);
+                    model.rotation.y = rotationY;
+                    model.traverse(c => { c.castShadow = true; });
+                    const label = createDeviceLabel(labelText, key);
+                    label.position.set(0, labelOffsetY, 0);
+                    model.add(label);
+                    houseGroup.add(model); // Thêm vào nhà
+                    devices3D[key] = model;
+                    model.visible = false; // Ẩn ban đầu
+                },
+                undefined, // onProgress
+                (error) => onLoadError(key, fullUrl, error));
+            }
+
+             // Hàm tải EV
+            function loadEVCharger() {
+                devices3D.ev_charger = new THREE.Group();
+                devices3D.ev_charger.visible = false; // Ẩn group ban đầu
+                const evLabel = createDeviceLabel('Sạc EV: 0.00 kW', 'ev_charger');
+                evLabel.position.set(1.5, 1.5, 0); // Gần xe hơn
+                devices3D.ev_charger.add(evLabel);
+
+                const chargerUrl = modelBaseUrl + "b9Yj0mQy2p9";
+                gltfLoader.load(chargerUrl, (gltf) => {
+                    console.log(`✅ Tải thành công: EV Charger Box từ ${chargerUrl}`);
+                    const chargerModel = gltf.scene;
+                    chargerModel.scale.set(0.8, 0.8, 0.8);
+                    chargerModel.position.set(7.5, 0.5, 3);
+                    chargerModel.rotation.y = -Math.PI / 2;
+                    chargerModel.traverse(c => { c.castShadow = true; });
+                    devices3D.ev_charger.add(chargerModel);
+                }, undefined, (error) => onLoadError('ev_charger_box', chargerUrl, error));
+
+                const carUrl = modelBaseUrl + "b-YtAXR0i24";
+                gltfLoader.load(carUrl, (gltf) => {
+                     console.log(`✅ Tải thành công: EV Car từ ${carUrl}`);
+                    const carModel = gltf.scene;
+                    carModel.scale.set(1.2, 1.2, 1.2);
+                    carModel.position.set(9.5, 0.15, 2.5);
+                    carModel.rotation.y = -Math.PI / 2;
+                    carModel.traverse(c => { c.castShadow = true; });
+                    devices3D.ev_charger.add(carModel);
+                }, undefined, (error) => onLoadError('ev_car', carUrl, error));
+
+                scene.add(devices3D.ev_charger);
+            }
+
+
+            // 💡 Lights (Giữ nguyên)
+            const lightGeo = new THREE.SphereGeometry(0.25, 16, 16); const lightMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0x000000, emissiveIntensity: 0 }); devices3D.lights = new THREE.Mesh(lightGeo, lightMat); devices3D.lights.position.set(0, 3.2, 0); const lightSource = new THREE.PointLight(0xffd700, 0, 8); devices3D.lights.add(lightSource); devices3D.lights.userData.lightSource = lightSource; const lightLabel = createDeviceLabel('Đèn: 0.00 kW', 'lights'); lightLabel.position.set(0, 0.5, 0); devices3D.lights.add(lightLabel); houseGroup.add(devices3D.lights); devices3D.lights.visible = false; // Ẩn ban đầu
+
+            // Tải các thiết bị khác
+            console.log("Bắt đầu tải các mô hình GLB...");
+            loadDevice('fridge', "65d7iI6S0A2", 1.5, [-5, 0.15, -4], Math.PI, 'Tủ lạnh: 0.00 kW', 2.0);
+            loadDevice('tv', "a-X4-bnm2gE", 1.5, [-4.5, 0.8, -4.85], 0, 'TV: 0.00 kW', 1.0);
+            loadDevice('ac', "a1S0-q0e-4-", 0.015, [4, 3, -4.8], 0, 'AC: 0.00 kW', 20);
+            loadDevice('heater', "cpoV9aUT3Yi", 0.6, [4, 0.15, 3.5], -Math.PI / 2, 'Sưởi: 0.00 kW', 1.0);
+            loadDevice('washing_machine', "5Gz1-6-b8Lf", 1.4, [-4.5, 0.15, 3.5], Math.PI / 2, 'Máy giặt: 0.00 kW', 1.2);
+            loadDevice('dishwasher', "c_jB03uD6g_", 0.012, [-5.2, 0.15, -2.5], Math.PI / 2, 'Rửa bát: 0.00 kW', 60);
+            loadDevice('laptop', "5-3-p9-n7-V", 0.5, [-4, 0.8, 0.5], 0, 'Laptop: 0.00 kW', 0.5);
+            loadEVCharger(); // Tải EV riêng
+            console.log("Đã gửi yêu cầu tải tất cả mô hình.");
+
+        }
+
+        // ==================== 3D BATTERY ====================
+        function createBattery() {
+            batteryGroup = new THREE.Group();
+            batteryGroup.position.set(8, 0, -3);
+            const totalHeight = 3;
+            const capacityGeo = new THREE.CylinderGeometry(0.8, 0.8, totalHeight, 32, 1, true);
+            const capacityMat = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, transparent: true, opacity: 0.3 });
+            const batteryCapacity = new THREE.Mesh(capacityGeo, capacityMat); // Đổi tên biến để tránh lỗi khai báo lại
+            batteryCapacity.position.y = totalHeight / 2;
+            batteryGroup.add(batteryCapacity);
+            const fillGeo = new THREE.CylinderGeometry(0.7, 0.7, totalHeight, 32);
+            const fillMat = new THREE.MeshStandardMaterial({ color: 0x64ffda, emissive: 0x64ffda, emissiveIntensity: 0.2 });
+            batteryFill = new THREE.Mesh(fillGeo, fillMat);
+            batteryFill.position.y = totalHeight / 2;
+            batteryGroup.add(batteryFill);
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'label label-soc';
+            labelDiv.textContent = 'SOC: 50%';
+            batteryLabelElement = labelDiv;
+            const batteryLabel = new THREE.CSS2DObject(labelDiv);
+            batteryLabel.position.set(0, totalHeight + 0.5, 0);
+            batteryGroup.add(batteryLabel);
+            scene.add(batteryGroup);
+        }
+
+        // ==================== SOLAR PANEL ====================
+        function createSolarPanel() {
+            solarPanel = new THREE.Group(); // Chuyển thành Group
+            const panelGeo = new THREE.BoxGeometry(4, 0.1, 2.5);
+            const panelMat = new THREE.MeshStandardMaterial({ color: 0x1a2536, metalness: 0.8, roughness: 0.2 });
+            const panelMesh = new THREE.Mesh(panelGeo, panelMat);
+            panelMesh.castShadow = true;
+            solarPanel.add(panelMesh);
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'label label-pv';
+            labelDiv.textContent = 'PV: 0.00 kW';
+            solarPanelLabelElement = labelDiv;
+            const pvLabel = new THREE.CSS2DObject(labelDiv);
+            pvLabel.position.set(0, 0.5, 0);
+            solarPanel.add(pvLabel);
+            solarPanel.position.set(-3.5, 4.4, -2.5);
+            solarPanel.rotation.y = Math.PI / 4;
+            solarPanel.rotation.x = -0.4;
+            houseGroup.add(solarPanel); // Thêm group vào nhà
+        }
+
+        // ==================== GRID CONNECTION ====================
+        function createGridConnection() {
+            const poleGeo = new THREE.CylinderGeometry(0.15, 0.15, 8, 12);
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x593d2b });
+            const gridPole = new THREE.Mesh(poleGeo, poleMat); // Đổi tên biến để tránh lỗi
+            gridPole.position.set(12, 4, -8);
+            gridPole.castShadow = true;
+            scene.add(gridPole);
+        }
+
+        // ==================== UI & CONTROLS ====================
+        function cacheUIElements() {
+            ui.timestep = document.getElementById('timestep-display'); ui.weather = document.getElementById('weather'); ui.occupancy = document.getElementById('occupancy'); ui.soc = document.getElementById('soc'); ui.batteryFill = document.getElementById('battery-fill'); ui.pv = document.getElementById('pv'); ui.load = document.getElementById('load'); ui.grid = document.getElementById('grid'); ui.timeline = document.getElementById('timeline'); ui.playBtn = document.getElementById('play-btn'); ui.pauseBtn = document.getElementById('pause-btn'); ui.resetBtn = document.getElementById('reset-btn'); ui.deviceIcons = {}; document.querySelectorAll('.device-icon').forEach(icon => { const deviceName = icon.dataset.device; if (deviceName) { ui.deviceIcons[deviceName] = icon; } });
+        }
+
+        function setupControls() {
+            ui.timeline.addEventListener('input', (e) => { pauseSimulation(); const time = parseInt(e.target.value, 10); updateVisualization(time); }); ui.playBtn.addEventListener('click', playSimulation); ui.pauseBtn.addEventListener('click', pauseSimulation); ui.resetBtn.addEventListener('click', resetSimulation);
+        }
+        function playSimulation() { if (isPlaying) return; isPlaying = true; ui.playBtn.textContent = '▶️ Playing...'; advanceTime(); simulationInterval = setInterval(advanceTime, 1500); }
+        function pauseSimulation() { isPlaying = false; clearInterval(simulationInterval); simulationInterval = null; ui.playBtn.textContent = '▶️ Play'; }
+        function resetSimulation() { pauseSimulation(); updateVisualization(0); }
+        function advanceTime() { let nextTime = (currentTime + 1) % (SIMULATION_DATA.timesteps?.length || 24); updateVisualization(nextTime); }
+
+        // ==================== UPDATE LOGIC ====================
+        function updateVisualization(time) {
+            // Thoát sớm nếu dữ liệu chưa sẵn sàng
+            if (!SIMULATION_DATA || !SIMULATION_DATA.timesteps || !SIMULATION_DATA.device_power || !SIMULATION_DATA.devices) {
+                console.warn("Dữ liệu simulation chưa đầy đủ, đang chờ...");
+                return;
+            }
+
+            currentTime = time;
+            const data = SIMULATION_DATA;
+            const t = time;
+
+            // --- 1. Update UI Panel ---
+            ui.timestep.textContent = `Giờ: ${t}`;
+            ui.timeline.value = t;
+            const weather = data.weather[t];
+            ui.weather.textContent = weather.charAt(0).toUpperCase() + weather.slice(1);
+
+            const occupancy = Math.round(data.occupancy[t] * 4);
+            ui.occupancy.textContent = `${occupancy}/4`;
+            if (occupancyLabelElement) {
+                occupancyLabelElement.textContent = `Số người: ${occupancy}`;
+            }
+
+            const soc = data.soc[t];
+            ui.soc.textContent = `${Math.round(soc * 100)}%`;
+            ui.batteryFill.style.width = `${soc * 100}%`;
+            ui.pv.textContent = `${data.pv[t].toFixed(2)} kW`;
+            ui.load.textContent = `${data.load[t].toFixed(2)} kW`;
+            ui.grid.textContent = `${data.grid[t].toFixed(2)} kW`;
+
+            // --- 2. Update Device Icons (UI) ---
+            const devicesOn = data.devices[t]; // {lights: true, tv: false, ...}
+            if (devicesOn) {
+                for (const deviceName in devicesOn) {
+                    const icon = ui.deviceIcons[deviceName];
+                    if (icon) {
+                        const isDeviceOn = devicesOn[deviceName];
+                        icon.classList.toggle('device-on', isDeviceOn);
+                        icon.classList.toggle('device-off', !isDeviceOn);
+                    }
+                }
+            } else {
+                 console.warn(`Không tìm thấy dữ liệu 'devices' cho timestep ${t}`);
+            }
+
+
+            // --- 3. Update 3D Scene ---
+            // Update 3D Battery
+            const totalBatteryHeight = 3;
+            const fillHeight = soc * totalBatteryHeight;
+            // Đảm bảo scale không âm
+            batteryFill.scale.y = Math.max(0.001, soc);
+            // Tính toán lại vị trí y để đáy luôn cố định
+            batteryFill.position.y = (soc * totalBatteryHeight / 2);
+
+            if (batteryLabelElement) {
+                batteryLabelElement.textContent = `SOC: ${Math.round(soc * 100)}%`;
+            }
+
+            // Update 3D Devices & Labels
+            const devicePower = data.device_power[t]; // {lights: 0.1, tv: 0.0, ...}
+
+            if(devicePower && devicesOn) {
+                 // Cập nhật PV
+                if (solarPanelLabelElement) {
+                    const pvPower = devicePower.pv || 0;
+                    solarPanelLabelElement.textContent = `PV: ${pvPower.toFixed(2)} kW`;
+                    solarPanelLabelElement.style.visibility = (pvPower > 0.01) ? 'visible' : 'hidden'; // Chỉ hiện khi > 0.01
+                }
+
+                // Map tên thiết bị sang tên hiển thị tiếng Việt
+                const displayNameMap = {'lights': 'Đèn', 'fridge': 'Tủ lạnh', 'tv': 'TV', 'ac': 'AC', 'heater': 'Sưởi', 'washing_machine': 'Máy giặt', 'dishwasher': 'Rửa bát', 'laptop': 'Laptop', 'ev_charger': 'Sạc EV'};
+
+                // Cập nhật các thiết bị khác
+                for (const key in devicesOn) {
+                    const model = devices3D[key];
+                    const label = devices3D_labels[key];
+                    const isDeviceOn = devicesOn[key];
+
+                    // 1. Ẩn/Hiện mô hình
+                    if (model) {
+                        model.visible = isDeviceOn;
+
+                        // Xử lý đèn
+                        if (key === 'lights') {
+                            model.material.emissiveIntensity = isDeviceOn ? 1 : 0;
+                            model.userData.lightSource.intensity = isDeviceOn ? 2 : 0;
+                        }
+                    } else {
+                        // Nếu model chưa tải xong, vẫn log để biết
+                         if(isDeviceOn) console.log(`Model cho '${key}' chưa tải xong nhưng dữ liệu báo ON.`);
+                    }
+
+
+                    // 2. Ẩn/Hiện và cập nhật Nhãn
+                    if (label) {
+                        if (isDeviceOn) {
+                            const power = devicePower[key] || 0;
+                            const displayName = displayNameMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
+                            label.element.textContent = `${displayName}: ${power.toFixed(2)} kW`;
+                            // Chỉ hiện nhãn nếu công suất > 0 (trừ tủ lạnh luôn hiện)
+                            label.element.style.visibility = (power > 0.01 || key === 'fridge') ? 'visible' : 'hidden';
+                        } else {
+                            label.element.style.visibility = 'hidden';
+                        }
+                    }
+                }
+            } else {
+                 console.warn(`Không tìm thấy dữ liệu 'device_power' hoặc 'devices' cho timestep ${t}`);
+            }
+
+
+            // Update 3D Weather
+            updateWeather3D(weather, t);
+        }
+
+        // ==================== UPDATE WEATHER 3D ====================
+        function updateWeather3D(weather, time) {
+            rain.visible = false; sunLight.intensity = 1.0; sun3D.visible = true; sunGlow.visible = true; hemisphereLight.intensity = 0.5; if (lightningFlash.intensity > 0) lightningFlash.intensity = 0; const sunAngle = (time / 23) * Math.PI - (Math.PI / 2); sunLight.position.set(Math.cos(sunAngle) * 40, Math.sin(sunAngle) * 40 + 10, 20); sun3D.position.set(sunLight.position.x, sunLight.position.y, -30); if (time < 6 || time > 18) { ambientLight.intensity = 0.1; sunLight.intensity = 0; hemisphereLight.intensity = 0.2; scene.background.set(0x1a1a2e); scene.fog.color.set(0x1a1a2e); } else { ambientLight.intensity = 0.5; scene.background.set(0x87ceeb); scene.fog.color.set(0x87ceeb); } switch(weather) { case 'sunny': cloudGroup.forEach(c => c.visible = false); break; case 'mild': cloudGroup.forEach((c, i) => c.visible = (i < 5)); break; case 'cloudy': cloudGroup.forEach(c => c.visible = true); sunGlow.visible = false; ambientLight.intensity *= 0.7; sunLight.intensity *= 0.4; hemisphereLight.intensity = 0.4; scene.background.set(0xbdc3c7); scene.fog.color.set(0xbdc3c7); break; case 'rainy': cloudGroup.forEach(c => c.visible = true); sun3D.visible = false; sunGlow.visible = false; rain.visible = true; ambientLight.intensity *= 0.4; sunLight.intensity *= 0.2; hemisphereLight.intensity = 0.3; scene.background.set(0x7f8c8d); scene.fog.color.set(0x7f8c8d); break; case 'stormy': cloudGroup.forEach(c => c.visible = true); sun3D.visible = false; sunGlow.visible = false; rain.visible = true; ambientLight.intensity *= 0.2; sunLight.intensity *= 0.1; hemisphereLight.intensity = 0.2; scene.background.set(0x34495e); scene.fog.color.set(0x34495e); break; default: cloudGroup.forEach(c => c.visible = false); }
+        }
+
+        // ==================== ANIMATION LOOP ====================
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls) controls.update(); // Cập nhật OrbitControls
+
+            // Chỉ chạy animation thời tiết/mưa/sét nếu có dữ liệu
+            if (SIMULATION_DATA && SIMULATION_DATA.weather && SIMULATION_DATA.weather[currentTime]) {
+                if (rain.visible) {
+                    const positions = rain.geometry.attributes.position.array; const velocities = rain.geometry.attributes.velocity.array; for (let i = 0; i < positions.length; i += 3) { positions[i + 1] -= velocities[i / 3]; if (positions[i + 1] < 0) { positions[i + 1] = 40; } } rain.geometry.attributes.position.needsUpdate = true;
+                }
+                if (SIMULATION_DATA.weather[currentTime] === 'stormy') {
+                    if (Math.random() > 0.98 && lightningFlash.intensity === 0) { lightningFlash.intensity = 20; } else if (lightningFlash.intensity > 0) { lightningFlash.intensity -= 1.5; }
+                }
+                cloudGroup.forEach(cloud => { if (cloud.visible) { cloud.position.x += 0.01; if (cloud.position.x > 30) { cloud.position.x = -30; } } });
+            }
+
+            renderer.render(scene, camera);
+            if (labelRenderer) labelRenderer.render(scene, camera); // Render nhãn
+        }
+
+        // ==================== RESIZE HANDLER ====================
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            if (labelRenderer) labelRenderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
     </script>
 </body>
 </html>
