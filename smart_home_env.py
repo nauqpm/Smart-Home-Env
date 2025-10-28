@@ -1,4 +1,3 @@
-# smart_home_env.py
 """
 Gym environment for Smart Home HEMS with hybrid scheme:
 - agent controls shiftable loads (SU and SI)
@@ -9,13 +8,21 @@ Usage:
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from human_behavior import HumanBehavior
+from human_behavior import HumanBehavior # Đảm bảo import file human_behavior.py MỚI (File 2)
 
 try:
     import pulp
 except Exception:
     pulp = None
     print("WARNING: pulp not installed. _solve_one_step will use heuristic fallback.")
+
+# === LẤY DEVICE_POWER_MAP TỪ run_episode_plot.py ===
+# Tốt hơn là nên định nghĩa nó ở đây hoặc trong 1 file config chung
+DEVICE_POWER_MAP = {
+    "lights": 0.1, "fridge": 0.2, "tv": 0.15, "ac": 1.5, "heater": 1.0,
+    "washing_machine": 0.5, "dishwasher": 0.8, "laptop": 0.08, "ev_charger": 3.3
+}
+# ====================================================
 
 class SmartHomeEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -28,16 +35,14 @@ class SmartHomeEnv(gym.Env):
         self.T = len(self.price)
         self.forecast_horizon = forecast_horizon
 
+        # self.behavior SẼ ĐƯỢC SET TỪ BÊN NGOÀI (qua set_month_behavior hoặc .behavior)
         self.behavior = None
 
         # === MÔ PHỎNG THỜI TIẾT ===
         self.weather_states = ["sunny", "mild", "cloudy", "rainy", "stormy"]
         self.weather_factors = {
-            "sunny": 1.0,
-            "mild": 0.8,
-            "cloudy": 0.5,
-            "rainy": 0.3,
-            "stormy": 0.1
+            "sunny": 1.0, "mild": 0.8, "cloudy": 0.5,
+            "rainy": 0.3, "stormy": 0.1
         }
         # Ma trận chuyển Markov cho thời tiết
         self.weather_transition = {
@@ -60,11 +65,32 @@ class SmartHomeEnv(gym.Env):
         self.N_si = len(config.get('shiftable_si', []))
 
         # Không gian quan sát và hành động
-        obs_len = 4 + self.N_si + self.N_su
+        # === SỬA LỖI: obs_len phải khớp với _get_obs ===
+        # _get_obs trả về: 4 + 2*forecast_horizon + N_si + N_su
+        obs_len = 4 + 2 * self.forecast_horizon + self.N_si + self.N_su
         self.observation_space = spaces.Box(low=-1e6, high=1e6, shape=(obs_len,), dtype=np.float32)
         self.action_space = spaces.MultiBinary(self.N_su + self.N_si)
 
-        self.reset()
+        # Không gọi reset() ở đây, hãy để script bên ngoài gọi
+        # self.reset()
+
+    def set_month_behavior(self, month_behavior):
+        """
+        Nạp hành vi nhiều ngày (multi-day) từ HumanBehavior
+        month_behavior: dict[day_index] = daily_behavior
+        """
+        self.month_behavior = month_behavior
+        self.current_day = 0
+        self.current_behavior = month_behavior[self.current_day]
+        print(f"📅 Mô phỏng bắt đầu: Ngày {self.current_day}, loại ngày = {self.current_behavior['event_type']}")
+
+    def _update_behavior_for_new_day(self):
+        """Chuyển sang ngày tiếp theo và cập nhật hành vi"""
+        if hasattr(self, "month_behavior"):
+            self.current_day = (self.current_day + 1) % len(self.month_behavior)
+            self.current_behavior = self.month_behavior[self.current_day]
+            print(f"📅 Chuyển sang ngày {self.current_day}, loại ngày = {self.current_behavior['event_type']}")
+
 
     def reset(self):
         self.t = 0
@@ -75,17 +101,36 @@ class SmartHomeEnv(gym.Env):
         self.su_remaining = [self.cfg['shiftable_su'][i]['L'] for i in range(self.N_su)]
         self.total_cost = 0.0
         self.total_energy_bought = 0.0
-        # === KHỞI TẠO DỮ LIỆU THỜI TIẾT ===
         self.current_weather = "mild"
         self.weather_series = []
 
-        self.behavior = HumanBehavior(T=self.T, weather=self.current_weather)
+        # === SỬA LOGIC RESET ===
+        # KHÔNG ghi đè self.behavior nếu nó đã được set (ví dụ: qua set_month_behavior)
+        if hasattr(self, "current_behavior"):
+            # Chế độ Multi-day
+            self.behavior = self.current_behavior
+        elif not hasattr(self, 'behavior') or self.behavior is None:
+            # Chế độ Single-day (hoặc fallback)
+            # Tạo behavior 1 ngày và bọc nó lại để tương thích
+            print("Cảnh báo: Không tìm thấy 'current_behavior', tạo behavior 1 ngày (fallback).")
+            hb_single = HumanBehavior(T=self.T, weather=self.current_weather)
+            behavior_data = hb_single.generate_daily_behavior(sample_device_states=True)
+            # Gán behavior_data (là dict) trực tiếp
+            self.behavior = behavior_data
+        # Nếu self.behavior đã được set (ví dụ: BehaviorWrapper), cứ để yên.
+        # =======================
 
         for t in range(self.T):
             probs = self.weather_transition[self.current_weather]
             self.current_weather = np.random.choice(self.weather_states, p=probs)
             self.weather_series.append(self.current_weather)
-        return self._get_obs()
+
+        # Lấy obs và đảm bảo nó đúng shape
+        obs = self._get_obs()
+        if obs.shape != self.observation_space.shape:
+             raise ValueError(f"Lỗi Shape: observation_space shape {self.observation_space.shape} "
+                              f"nhưng _get_obs() trả về shape {obs.shape}")
+        return obs
 
     def _get_obs(self):
         # Observation bao gồm dự báo ngắn hạn
@@ -96,6 +141,12 @@ class SmartHomeEnv(gym.Env):
         # dự báo PV và giá (theo horizon)
         forecast_prices = self.price[self.t:min(self.t + self.forecast_horizon, self.T)]
         forecast_pv = self.pv[self.t:min(self.t + self.forecast_horizon, self.T)]
+
+        # Thêm padding nếu dự báo ngắn hơn horizon
+        if len(forecast_prices) < self.forecast_horizon:
+            forecast_prices = np.pad(forecast_prices, (0, self.forecast_horizon - len(forecast_prices)), 'edge')
+        if len(forecast_pv) < self.forecast_horizon:
+            forecast_pv = np.pad(forecast_pv, (0, self.forecast_horizon - len(forecast_pv)), 'edge')
 
         obs = [t_norm, rho, pv_now, self.SOC]
         obs += forecast_prices.tolist() + forecast_pv.tolist()
@@ -109,32 +160,64 @@ class SmartHomeEnv(gym.Env):
         act_si = action[self.N_su:].tolist() if self.N_si > 0 else []
 
         # ===== 1. TÍNH TOÁN TẢI =====
+
+        # --- 1a. Tải điều khiển bởi Agent ---
         P_su_t = sum(su["rate"] for i, su in enumerate(self.cfg["shiftable_su"])
                      if self.t >= su["t_s"] and self.t <= su["t_f"] and act_su[i] == 1)
         P_si_t = sum(si["rate"] for i, si in enumerate(self.cfg["shiftable_si"])
                      if self.t >= si["t_s"] and self.t <= si["t_f"] and act_si[i] == 1)
 
+        # --- 1b. Tải Cố định và Điều chỉnh (Adjustable) ---
         P_cr_t = self.cfg.get("critical", [0.0] * self.T)[self.t]
-        P_ad_t = sum(ad["P_com"] for ad in self.cfg.get("adjustable", []))
-        P_load = P_cr_t + P_ad_t + P_su_t + P_si_t
+        P_ad_t = sum(ad["P_com"] for ad in self.cfg.get("adjustable", [])) # Giả định P_com
 
-        # Điều chỉnh tải theo hành vi con người
-        occ_factor = self.behavior.occupancy[self.t]
+        # --- 1c. Tải của Con người (Human Behavior) ---
+        # Logic này sẽ thay thế khối (142-161) cũ
+        P_human_t = 0.0
+        device_states_t = {} # Để lưu trạng thái cho info
 
-        # Giảm tải khi nhà vắng
-        P_load *= (0.5 + 0.5 * occ_factor)
+        if isinstance(self.behavior, dict):
+            # Chế độ Multi-day (behavior là dict từ HumanBehavior MỚI)
+            device_states = self.behavior.get("device_states")
+            if device_states:
+                for device_name, power in DEVICE_POWER_MAP.items():
+                    # Lấy trạng thái ON/OFF của thiết bị tại giờ t
+                    is_on = device_states.get(device_name, [False]*self.T)[self.t]
+                    device_states_t[device_name] = is_on
+                    if is_on:
+                        # KIỂM TRA XUNG ĐỘT: Không tính tải nếu agent đang điều khiển nó
+                        # (Giả định: agent "thắng" con người)
+                        is_agent_controlled = False
+                        if device_name == "washing_machine": # Tên này phải khớp với DEVICE_POWER_MAP
+                             is_agent_controlled = True # Giả sử SU[0] là washing_machine
+                        if device_name == "dishwasher":
+                             is_agent_controlled = True # Giả sử SU[1] là dishwasher
+                        if device_name == "ev_charger":
+                             is_agent_controlled = True # Giả sử SI[0] là ev_charger
 
-        # Bật thêm tải ngẫu nhiên nếu có người ở nhà
-        if occ_factor > 0.7:
-            device_profile = self.behavior.device_usage
-            if device_profile["tv_prob"][self.t] > 0.5:
-                P_load += 0.1
-            if device_profile["ac_prob"][self.t] > 0.5:
-                P_load += 0.5
-            if device_profile["laptop_prob"][self.t] > 0.5:
-                P_load += 0.08
-            if device_profile["heater_prob"][self.t] > 0.5:
-                P_load += 0.4
+                        if not is_agent_controlled:
+                            P_human_t += power
+
+        elif hasattr(self.behavior, 'device_usage'):
+            # Chế độ Single-day (dùng BehaviorWrapper)
+            # (Logic này giống hệt khối 142-161 cũ, nhưng truy cập đúng)
+            occ_factor = self.behavior.occupancy[self.t]
+            device_profile = self.behavior.device_usage # Đây là device_probs
+
+            if occ_factor > 0.7 and isinstance(device_profile, dict):
+                # Kiểm tra key tồn tại trước khi truy cập
+                if "tv" in device_profile and device_profile["tv"][self.t] > 0.5:
+                    P_human_t += DEVICE_POWER_MAP["tv"]
+                if "ac" in device_profile and device_profile["ac"][self.t] > 0.5:
+                    P_human_t += DEVICE_POWER_MAP["ac"]
+                if "laptop" in device_profile and device_profile["laptop"][self.t] > 0.5:
+                    P_human_t += DEVICE_POWER_MAP["laptop"]
+                if "heater" in device_profile and device_profile["heater"][self.t] > 0.5:
+                    P_human_t += DEVICE_POWER_MAP["heater"]
+
+        # --- 1d. Tải Tổng cộng ---
+        P_load = P_cr_t + P_ad_t + P_su_t + P_si_t + P_human_t
+
 
         # === TÁC ĐỘNG CỦA THỜI TIẾT LÊN PV ===
         weather = self.weather_series[self.t]
@@ -153,6 +236,13 @@ class SmartHomeEnv(gym.Env):
             P_surplus = P_pv - P_load
             if self.SOC < soc_max:
                 P_ch = P_surplus
+                # === SỬA LỖI TÍNH TOÁN SOC ===
+                # Phải chia cho dung lượng pin (ví dụ: C_bat) hoặc chuẩn hóa
+                # Giả sử self.T là dung lượng pin (Cách tính cũ của bạn)
+                # Tốt hơn: Giả sử pin có dung lượng 10kWh, P_ch tính bằng kW
+                # C_bat = 10 # kWh
+                # self.SOC = min(soc_max, self.SOC + (eta_ch * P_ch * self.time_step) / C_bat)
+                # Tạm dùng cách tính cũ của bạn:
                 self.SOC = min(soc_max, self.SOC + eta_ch * P_ch / self.T)
         else:
             P_deficit = P_load - P_pv
@@ -203,16 +293,32 @@ class SmartHomeEnv(gym.Env):
             "cost": cost,
             "is_night": is_night,
             "weather": weather,
-            "weather_factor": weather_factor
+            "weather_factor": weather_factor,
+            "P_human": P_human_t,
+            "P_agent_su": P_su_t,
+            "P_agent_si": P_si_t,
+            "device_states": device_states_t
         }
 
         self.t += 1
         done = (self.t >= self.T)
+        if done:
+            self._update_behavior_for_new_day()
+
         obs = self._get_obs() if not done else np.zeros(self.observation_space.shape, dtype=np.float32)
+        # Đảm bảo obs trả về có shape chính xác
+        if obs.shape != self.observation_space.shape:
+            # Xử lý trường hợp done=True và trả về obs 0
+            if done:
+                 obs = np.zeros(self.observation_space.shape, dtype=np.float32)
+            else:
+                raise ValueError(f"Lỗi Shape sau khi step: observation_space shape {self.observation_space.shape} "
+                                 f"nhưng _get_obs() trả về shape {obs.shape}")
+
         return obs, reward, done, info
 
     def _solve_one_step(self, P_net_without_ad):
-        # Heuristic fallback if pulp missing
+        # ... (Hàm này không thay đổi) ...
         rho_b = self.price[self.t]
         if pulp is None or self.N_ad == 0:
             P_ad = []
@@ -253,6 +359,7 @@ class SmartHomeEnv(gym.Env):
         return P_ad, P_b, P_s
 
     def get_tiered_price(total_consumption_kwh):
+        # ... (Hàm này không thay đổi) ...
         # Giá điện theo bậc (đồng/kWh)
         tiers = [
             (50, 1984),
@@ -301,7 +408,11 @@ if __name__ == "__main__":
         "reward_mode": "advanced"
     }
     env = SmartHomeEnv(price, pv, config)
-    obs = env.reset()
+
+    # === Demo cho Chế độ 1 ngày (Single-day) ===
+    # (Để demo multi-day, bạn cần chạy run_episode_plot.py)
+    print("--- Chạy Demo 1 ngày (Single-day) ---")
+    obs = env.reset() # reset() sẽ tự tạo behavior fallback
     done = False
     while not done:
         action = np.random.randint(0,2, size=env.N_su + env.N_si)
