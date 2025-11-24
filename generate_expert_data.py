@@ -13,8 +13,7 @@ import time
 # Từ Bước 1
 from lbwo_optimizer import LBWO
 # Từ File 1 (ở trên)
-from deterministic_simulator import _generate_forecasts, calculate_total_cost, N_SU, N_SI, T, cfg
-
+from deterministic_simulator import _generate_forecasts, calculate_total_cost, N_SU, N_SI, T, cfg, BAT_SOC_MAX, BAT_SOC_MIN, BAT_ETA_CH, BAT_ETA_DIS
 
 # Lấy hàm _get_obs từ smart_home_env.py (nếu nó độc lập)
 # Tái định nghĩa một hàm _get_obs đơn giản hóa ở đây

@@ -46,7 +46,10 @@ def _generate_forecasts():
 
     # 3. Dự báo Tải người dùng (Tải không thể điều khiển)
     human = HumanBehavior(num_people=4, T=T, weather=weather_condition)
-    _occ, activity_profile = human.generate_daily_behavior()
+    behavior_data = human.generate_daily_behavior()
+
+    _occ = behavior_data.get("occupancy_ratio")  # Hoặc behavior_data.get("presence_counts")
+    activity_profile = behavior_data.get("device_probs")
 
     human_load_forecast = np.zeros(T)
 
@@ -59,13 +62,13 @@ def _generate_forecasts():
 
     # Các thiết bị này LÀ MỘT PHẦN của human_behavior.py
     # nhưng KHÔNG có trong cfg['shiftable']
-    human_devices = ["lights", "fridge", "tv_prob", "laptop_prob"]
+    human_devices = ["lights", "fridge", "tv", "laptop"]
     # Map tên từ activity_profile sang DEVICE_POWER_MAP
     device_map_keys = {
         "lights": "lights",
         "fridge": "fridge",
-        "tv_prob": "tv",
-        "laptop_prob": "laptop"
+        "tv": "tv",
+        "laptop": "laptop"
     }
 
     for t in range(T):

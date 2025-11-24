@@ -4,282 +4,246 @@ import http.server
 import socketserver
 import threading
 import matplotlib.pyplot as plt
-from smart_home_env import SmartHomeEnv  # Ensure this exists
-from human_behavior import HumanBehavior  # Ensure this exists (upgraded API)
+from smart_home_env import SmartHomeEnv  # File mới của bạn
+from human_behavior import HumanBehavior  # File behavior của bạn
 import webbrowser
 import os
 
-# ===== CONFIG =====
-T = 24
-weather_states = ["sunny", "mild", "cloudy", "rainy", "stormy"]
-weather_condition = np.random.choice(weather_states)
+# ===== 1. CẤU HÌNH CƠ BẢN =====
+T = 24  # Độ dài 1 ngày (giờ)
 
-base_pv = np.clip(
-    1.5 * np.sin(np.linspace(0, 3.14, T)) + 0.2 * np.random.randn(T),
-    0, None
-)
-
-weather_factors = {
-    "sunny": np.clip(np.random.normal(1.0, 0.05, T), 0.9, 1.1),
-    "mild": np.clip(np.random.normal(0.85, 0.08, T), 0.7, 1.0),
-    "cloudy": np.clip(np.random.normal(0.6, 0.1, T), 0.4, 0.8),
-    "rainy": np.clip(np.random.normal(0.4, 0.1, T), 0.2, 0.6),
-    "stormy": np.clip(np.random.normal(0.2, 0.1, T), 0.05, 0.4),
-}
-pv = np.clip(base_pv * weather_factors[weather_condition], 0, None)
+# Giá điện (Time of Use - TOU)
 price = np.array([0.1] * 6 + [0.15] * 6 + [0.25] * 6 + [0.18] * 6)
 
-# ===== SYSTEM CONFIG =====
+# [THAY ĐỔI QUAN TRỌNG]: PV Profile đầu vào giờ chỉ là "placeholder" (giữ chỗ).
+# Environment sẽ tự tính toán lại dựa trên Vật lý (Ineichen/Zenith) bên trong.
+# Ta để mảng 0 để tránh nhầm lẫn.
+dummy_pv_profile = np.zeros(T)
+
+# ===== 2. CẤU HÌNH THIẾT BỊ (CONFIG) =====
 cfg = {
-    "critical": [
-        0.33, 0.33, 0.33, 0.33, 0.33, 0.33,
-        0.33, 0.33, 0.33, 0.33, 0.33, 0.33,
-        0.33, 0.33, 0.33, 0.33, 0.33, 0.53,
-        0.53, 0.53, 0.53, 0.53, 0.53, 0.33
-    ],
+    "critical": [0.33] * 24,  # Tải nền
+    # Tải có thể điều chỉnh công suất (AC, Bình nóng lạnh)
     "adjustable": [
         {"P_min": 0.5, "P_max": 2.0, "P_com": 1.5, "alpha": 0.06},  # AC
-        {"P_min": 0.0, "P_max": 2.0, "P_com": 1.5, "alpha": 0.08}  # Water heater
+        {"P_min": 0.0, "P_max": 2.0, "P_com": 1.5, "alpha": 0.08}  # Heater
     ],
+    # Tải có thể dời lịch (Máy giặt, Máy rửa bát) - Shiftable Uninterruptible
     "shiftable_su": [
         {"rate": 0.5, "L": 1, "t_s": 7, "t_f": 22},  # Washing machine
         {"rate": 0.8, "L": 1, "t_s": 19, "t_f": 23}  # Dishwasher
     ],
+    # Tải có thể ngắt quãng (Sạc xe điện) - Shiftable Interruptible
     "shiftable_si": [
         {"rate": 3.3, "E": 7.0, "t_s": 0, "t_f": 23}  # EV charger
     ],
-    "beta": 0.5,
-    "battery": {"soc0": 0.5, "soc_min": 0.1, "soc_max": 0.9, "eta_ch": 0.95, "eta_dis": 0.95}
+    "beta": 0.5,  # Trọng số ưu tiên bán điện (nếu có logic bán)
+    "battery": {
+        "soc0": 0.5, "soc_min": 0.1, "soc_max": 0.9,
+        "eta_ch": 0.95, "eta_dis": 0.95
+    }
 }
 
-print(f"🌦️ Thời tiết khởi đầu: {weather_condition}")
+# ===== 3. KHỞI TẠO MÔI TRƯỜNG & HUMAN BEHAVIOR =====
+print("⚙️ Đang khởi tạo Môi trường Smart Home (Physics-based)...")
+# Lưu ý: dummy_pv_profile được truyền vào nhưng sẽ bị class AdvancedPV ghi đè logic
+env = SmartHomeEnv(price, dummy_pv_profile, cfg)
 
-# ===== INIT ENV & HUMAN BEHAVIOR =====
-env = SmartHomeEnv(price, pv, cfg)
-
+# Khởi tạo hành vi con người
 human = HumanBehavior(num_people=4, T=T, seed=42, month=None)
-multi_day_mode = True
+multi_day_mode = True  # Chạy mô phỏng 30 ngày để thấy sự thay đổi thời tiết
 
 if multi_day_mode:
-    print("\n🧭 Bắt đầu mô phỏng nhiều ngày (30 ngày) với lịch sự kiện thực tế...")
-    # sinh hành vi cho cả tháng
+    print("\n🗓️ Đang sinh lịch trình sinh hoạt cho 30 ngày...")
     month_behavior = human.generate_month_behavior_with_schedule(start_day="monday", days=30)
 
-    # === THÊM DÒNG NÀY ===
-    # Nạp hành vi của tháng vào môi trường
+    # Nạp hành vi vào môi trường
     env.set_month_behavior(month_behavior)
-    # ======================
 
-    # đếm thống kê loại ngày
+    # Thống kê sơ bộ
     event_stats = {}
     for d, data in month_behavior.items():
         event_type = data.get("event_type", "unknown")
         event_stats[event_type] = event_stats.get(event_type, 0) + 1
-    print("📊 Thống kê loại ngày:")
-    for ev, cnt in event_stats.items():
-        print(f" - {ev}: {cnt} ngày")
-
-    # chọn ngày để mô phỏng
-    selected_day = 0
-    behavior = month_behavior[selected_day]
-    print(f"▶️ Mô phỏng ngày {selected_day + 1}: {behavior['event_type']}")
+    print(f"📊 Thống kê: {event_stats}")
 else:
-    # dùng mô phỏng 1 ngày như cũ
+    # Chế độ 1 ngày đơn giản
+    print("\n🗓️ Chạy mô phỏng 1 ngày đơn lẻ...")
+    # Env mới đã tự có logic fallback nếu không set behavior,
+    # nhưng ta set thủ công để kiểm soát tốt hơn.
     behavior = human.generate_daily_behavior(sample_device_states=True)
+    # Env mới hỗ trợ nhận dict behavior trực tiếp (qua logic fallback trong reset),
+    # hoặc ta có thể gán vào biến tạm nếu cần (tuy nhiên logic multi-day tốt hơn).
+    env.behavior = behavior
 
-
-    # --- PHẦN BỔ TRỢ: ĐẢM BẢO TƯƠNG THÍCH NGƯỢC VỚI ENV ---
-    # Bọc dữ liệu behavior mới để env.step() có thể dùng như cũ (occupancy, device_usage)
-    class BehaviorWrapper:
-        def __init__(self, b):
-            # Lưu ý: env cũ (File 1) đang tìm .occupancy và .device_usage
-            self.occupancy = b.get("occupancy_ratio", [1.0] * T)
-            self.device_usage = b.get("device_probs", {})  # Ánh xạ device_probs -> device_usage
-
-
-    env.behavior = BehaviorWrapper(behavior)
-
-# unpack behavior
-
-presence_counts = behavior.get("presence_counts")
-occupancy_profile = behavior.get("occupancy_ratio")
-activity_profile = behavior.get("activity_level")
-device_probs = behavior.get("device_probs")
-device_states = behavior.get("device_states")  # dict: device -> list[bool]
-
-# start environment
+# ===== 4. VÒNG LẶP MÔ PHỎNG (RUN EPISODE) =====
 obs = env.reset()
 done = False
-rewards, soc_hist, pv_hist, load_hist, grid_hist, weather_hist, occ_hist = [], [], [], [], [], [], []
-devices_hist = []
-device_power_hist = []
 
-# device nominal powers (kW)
-DEVICE_POWER_MAP = {
-    "lights": 0.1,
-    "fridge": 0.2,
-    "tv": 0.15,
-    "ac": 1.5,
-    "heater": 1.0,
-    "washing_machine": 0.5,
-    "dishwasher": 0.8,
-    "laptop": 0.08,
-    "ev_charger": 3.3
+# Các danh sách để lưu lịch sử chạy
+history = {
+    "rewards": [], "soc": [], "pv": [], "load": [],
+    "grid": [], "weather": [], "occupancy": [],
+    "devices": [], "device_power": []
 }
 
-# run episode
+# Mapping công suất danh định để vẽ biểu đồ
+DEVICE_POWER_MAP = {
+    "lights": 0.1, "fridge": 0.2, "tv": 0.15, "ac": 1.5, "heater": 1.0,
+    "washing_machine": 0.5, "dishwasher": 0.8, "laptop": 0.08, "ev_charger": 3.3
+}
+
+print("\n▶️ Bắt đầu chạy mô phỏng...")
 while not done:
+    # 1. Chọn hành động ngẫu nhiên (hoặc thay bằng Agent RL của bạn ở đây)
     action = env.action_space.sample()
+
+    # 2. Bước chạy môi trường
     obs, reward, done, info = env.step(action)
 
-    # record
-    rewards.append(reward)
-    soc_hist.append(info.get("SOC", 0.0))
-    pv_hist.append(float(info.get("P_pv", 0.0)))
-    load_hist.append(info.get("P_load", 0.0))
-    grid_hist.append(info.get("P_grid", 0.0))
-    weather_hist.append(info.get("weather", weather_condition))
+    # 3. Ghi lại dữ liệu từ INFO (Quan trọng: Lấy dữ liệu thực tế từ Env)
+    history["rewards"].append(reward)
+    history["soc"].append(info.get("SOC", 0.0))
 
-    # ensure valid timestep index
-    t_index = max(0, (env.t - 1) % T)
+    # [QUAN TRỌNG] Lấy PV từ info (được tính bằng pvlib) chứ không phải mảng đầu vào
+    history["pv"].append(float(info.get("P_pv", 0.0)))
 
-    # occupancy from new API
-    current_occupancy = float(occupancy_profile[t_index])
-    occ_hist.append(current_occupancy)
+    history["load"].append(info.get("P_load", 0.0))
+    history["grid"].append(info.get("P_grid", 0.0))
+    history["weather"].append(info.get("weather", "unknown"))
 
-    # get device on/off from sampled device_states
-    devices_t = {}
-    for d in DEVICE_POWER_MAP.keys():
-        # device_states keys follow device names; fridge is always True in behavior generation
-        ds = device_states.get(d)
-        if ds is not None:
-            devices_t[d] = bool(ds[t_index])
-        else:
-            # fallback to probability-based threshold
-            p = device_probs.get(d, [0]*T)[t_index]
-            devices_t[d] = (p > 0.5)
+    # Lấy thông tin thiết bị từ info (nếu Env trả về) hoặc behavior
+    # Logic lấy occupancy cho biểu đồ
+    if hasattr(env, 'current_behavior') and env.current_behavior:
+        occ = env.current_behavior.get("occupancy_ratio", [0] * T)
+        t_idx = (env.t - 1) % T
+        history["occupancy"].append(occ[t_idx])
+    else:
+        history["occupancy"].append(0)
 
-    devices_hist.append(devices_t)
+    # Lưu trạng thái thiết bị (On/Off) từ info
+    history["devices"].append(info.get("device_states", {}))
 
-    # compute power per device (use info if environment provides device-level power)
-    power_t = {}
-    for device_name, is_on in devices_t.items():
+    # Tính công suất từng thiết bị để vẽ biểu đồ stacked
+    # (Kết hợp trạng thái On/Off với công suất danh định)
+    dev_states = info.get("device_states", {})
+    p_t = {}
+    for d_name, is_on in dev_states.items():
         if is_on:
-            # check if env provided a device-specific power in info
-            key_map = {
-                "ac": "P_ac",
-                "heater": "P_heater",
-                "washing_machine": "P_washing_machine",
-                "dishwasher": "P_dishwasher",
-                "ev_charger": "P_ev_charger"
-            }
-            if device_name in key_map and key_map[device_name] in info:
-                power_t[device_name] = info[key_map[device_name]]
-            else:
-                power_t[device_name] = DEVICE_POWER_MAP.get(device_name, 0.0)
+            p_t[d_name] = DEVICE_POWER_MAP.get(d_name, 0.0)
         else:
-            power_t[device_name] = 0.0
+            p_t[d_name] = 0.0
+    p_t["pv"] = float(info.get("P_pv", 0.0))  # Lưu cả PV để tham chiếu
+    history["device_power"].append(p_t)
 
-    power_t["pv"] = float(info.get("P_pv", 0.0))
-    device_power_hist.append(power_t)
+print(f"✅ Hoàn thành mô phỏng. Tổng reward: {sum(history['rewards']):.2f}")
 
-# ===== PLOTTING =====
-fig, axs = plt.subplots(7, 1, figsize=(12, 14), sharex=True)
-axs[0].plot(pv_hist, label="PV (kW)")
-axs[0].plot(load_hist, label="Load (kW)")
+# ===== 5. VẼ BIỂU ĐỒ (PLOTTING) =====
+# Chỉ vẽ 24 giờ đầu tiên hoặc ngày cuối cùng để dễ nhìn,
+# hoặc vẽ toàn bộ nếu thích. Ở đây vẽ toàn bộ chuỗi thời gian.
+fig, axs = plt.subplots(7, 1, figsize=(12, 16), sharex=True)
+
+# Plot 1: PV vs Load
+axs[0].plot(history["pv"], label="PV (Physics-based)", color="orange")
+axs[0].plot(history["load"], label="Total Load", color="blue", alpha=0.7)
 axs[0].set_ylabel("Power (kW)")
-axs[0].set_title("PV vs Load")
+axs[0].set_title("PV Generation (Ineichen Model) vs House Load")
 axs[0].legend()
-axs[1].plot(soc_hist, color="orange")
-axs[1].set_ylabel("SOC")
-axs[1].set_title("Battery SOC")
-axs[2].plot(grid_hist, color="red")
-axs[2].set_ylabel("Grid Power (kW)")
-axs[2].set_title("Grid Power")
-axs[3].bar(range(len(rewards)), rewards, color="green")
+axs[0].grid(True, alpha=0.3)
+
+# Plot 2: Battery SOC
+axs[1].plot(history["soc"], color="green")
+axs[1].set_ylabel("SOC (0-1)")
+axs[1].set_title("Battery State of Charge")
+axs[1].grid(True, alpha=0.3)
+
+# Plot 3: Grid Interaction
+axs[2].plot(history["grid"], color="red")
+axs[2].set_ylabel("Grid Import (kW)")
+axs[2].set_title("Grid Energy Bought")
+axs[2].grid(True, alpha=0.3)
+
+# Plot 4: Rewards
+axs[3].bar(range(len(history["rewards"])), history["rewards"], color="purple", alpha=0.6)
 axs[3].set_ylabel("Reward")
-axs[3].set_title("Reward")
-weather_numeric = [weather_states.index(w) if w in weather_states else -1 for w in weather_hist]
-axs[4].plot(weather_numeric, marker="o")
-axs[4].set_yticks(range(len(weather_states)))
-axs[4].set_yticklabels(weather_states)
-axs[4].set_ylabel("Weather")
-axs[4].set_title("Weather Simulation")
-axs[5].plot(occ_hist, color="purple")
-axs[5].set_ylabel("Occupancy")
-axs[5].set_xlabel("Hour")
-axs[5].set_title("Occupancy")
-# device power summary (stacked or total)
-total_device_power = [sum(d.values()) for d in device_power_hist]
-axs[6].plot(total_device_power, color="brown")
-axs[6].set_ylabel("Total Device Power (kW)")
-axs[6].set_title("Total Device Power (incl. PV)")
+axs[3].set_title("Agent Reward per Step")
+
+# Plot 5: Weather (Categorical to Numeric)
+weather_states_list = ["sunny", "mild", "cloudy", "rainy", "stormy"]
+w_numeric = [weather_states_list.index(w) if w in weather_states_list else -1 for w in history["weather"]]
+axs[4].plot(w_numeric, marker=".", linestyle="none", color="cyan")
+axs[4].set_yticks(range(len(weather_states_list)))
+axs[4].set_yticklabels(weather_states_list)
+axs[4].set_ylabel("Condition")
+axs[4].set_title("Simulated Weather")
+axs[4].grid(True, axis='y')
+
+# Plot 6: Occupancy
+axs[5].plot(history["occupancy"], color="brown")
+axs[5].set_ylabel("Occupancy Ratio")
+axs[5].set_title("Human Occupancy")
+
+# Plot 7: Total Device Power Consumption
+total_dev_p = [sum([v for k, v in d.items() if k != 'pv']) for d in history["device_power"]]
+axs[6].plot(total_dev_p, color="black", linestyle="--")
+axs[6].set_ylabel("kW")
+axs[6].set_xlabel("Time Step (Hour)")
+axs[6].set_title("Total Appliance Power")
+
 plt.tight_layout()
-plot_filename = "simulation_plot.png"
-try:
-    plt.savefig(plot_filename)
-    print(f"✅ Đã lưu biểu đồ vào file: {plot_filename}")
-except Exception as e:
-    print(f"Lỗi khi lưu/mở file biểu đồ: {e}")
+plot_filename = "simulation_physics_plot.png"
+plt.savefig(plot_filename)
+print(f"📊 Đã lưu biểu đồ vào: {plot_filename}")
 plt.close(fig)
 
-# ===== EXPORT JSON =====
-simulation_data = {
-    "timesteps": list(range(T)),
-    "weather": weather_hist,
-    "occupancy": occ_hist,
-    "presence_counts": presence_counts,
-    "activity_level": activity_profile,
-    "soc": soc_hist,
-    "pv": pv_hist,
-    "load": load_hist,
-    "grid": grid_hist,
-    "rewards": rewards,
-    "devices": devices_hist,
-    "device_power": device_power_hist,
-    "device_probs": device_probs
+# ===== 6. XUẤT JSON & WEB SERVER =====
+# Chuẩn bị dữ liệu JSON (Cần convert numpy types sang python types)
+sim_data_export = {
+    "timesteps": list(range(len(history["pv"]))),
+    "weather": history["weather"],
+    "occupancy": history["occupancy"],
+    "soc": history["soc"],
+    "pv": history["pv"],
+    "load": history["load"],
+    "grid": history["grid"],
+    "rewards": history["rewards"],
+    "devices": history["devices"],  # List of dicts
+    "device_power": history["device_power"]  # List of dicts
 }
 
 with open("simulation_data.json", "w") as f:
-    json.dump(simulation_data, f, indent=2)
-print("✅ Đã lưu simulation_data.json (tương thích API mới)")
+    json.dump(sim_data_export, f, indent=2)
+print("💾 Đã xuất file simulation_data.json")
 
-if multi_day_mode:
-    summary = {ev: cnt for ev, cnt in event_stats.items()}
-    with open("month_summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
-    print("✅ Đã lưu month_summary.json (thống kê theo loại ngày)")
-
-# ===== SIMPLE WEB SERVER TO SERVE VISUALIZER =====
+# Server Code (Giữ nguyên như cũ)
 PORT = 8000
 FILE_TO_OPEN = 'visualizer.html'
 URL = f"http://localhost:{PORT}/{FILE_TO_OPEN}"
 Handler = http.server.SimpleHTTPRequestHandler
-httpd = None
+
 
 def start_server():
-    global httpd
     web_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(web_dir)
-    print(f"Thư mục phục vụ web: {web_dir}")
     try:
         httpd = socketserver.TCPServer(("", PORT), Handler)
-        print(f"✅ Máy chủ đang chạy tại: http://localhost:{PORT}")
-        print(f"Đang phục vụ tệp: {FILE_TO_OPEN}")
+        print(f"🚀 Server running at: {URL}")
         httpd.serve_forever()
-    except OSError as e:
-        print(f"❗️ Lỗi: Cổng {PORT} đã được sử dụng hoặc lỗi khác: {e}")
+    except OSError:
+        print(f"⚠️ Port {PORT} busy. Check: {URL}")
     except KeyboardInterrupt:
-        print("\nTắt máy chủ...")
-        if httpd:
-            httpd.shutdown()
+        pass
 
-print("\n" + "="*30)
-print(f"Khởi động máy chủ web để xem {FILE_TO_OPEN}...")
+
+# Tự động mở web
 try:
-    webbrowser.open_new_tab(URL)
-    print(f"🚀 Đã tự động mở {URL} trong trình duyệt.")
-except Exception as e:
-    print(f"Lỗi khi mở trình duyệt: {e}. Vui lòng tự mở link: {URL}")
+    # Tạo file html giả nếu chưa có để test (Optional)
+    if not os.path.exists(FILE_TO_OPEN):
+        with open(FILE_TO_OPEN, "w") as f:
+            f.write("<h1>Simulation Data Generated. Check console.</h1>")
 
-start_server()
+    threading.Thread(target=start_server, daemon=True).start()
+    webbrowser.open_new_tab(URL)
+    input("\n🔴 Nhấn Enter để dừng server và thoát chương trình...\n")
+except Exception as e:
+    print(f"Error: {e}")
