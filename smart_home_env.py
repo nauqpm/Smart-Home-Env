@@ -1,355 +1,274 @@
+# smart_home_env.py
 import numpy as np
 import pandas as pd
-import gymnasium as gym
-from gymnasium import spaces
-from human_behavior import HumanBehavior
+import math
+import logging
+from typing import Dict, List, Optional, Tuple
 
 try:
-    import pulp
-except ImportError:
-    pulp = None
+    from gymnasium import spaces
+except Exception:
+    import gym.spaces as spaces
 
+# PVLIB Imports (Optional)
 try:
     import pvlib
     from pvlib.location import Location
-    from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
+    from pvlib.irradiance import get_total_irradiance
+    from pvlib.temperature import sapm_cell
+    from pvlib.pvsystem import pvwatts_dc, pvwatts_ac
+
     HAS_PVLIB = True
-except ImportError:
+except Exception:
     HAS_PVLIB = False
 
-DEVICE_POWER_MAP = {
-    "lights": 0.1, "fridge": 0.2, "tv": 0.15, "ac": 1.5, "heater": 1.0,
-    "washing_machine": 0.5, "dishwasher": 0.8, "laptop": 0.08, "ev_charger": 3.3
-}
+logger = logging.getLogger('SmartHomeEnv')
+logger.setLevel(logging.INFO)
 
-class AdvancedPV:
-    def __init__(self, latitude=10.8, longitude=106.6, timezone='Asia/Ho_Chi_Minh',
-                 panel_capacity_kw=5.0, temp_coeff=-0.004):
-        self.location = Location(latitude, longitude, tz=timezone)
-        self.capacity = panel_capacity_kw
-        self.temp_coeff = temp_coeff
-        self.temp_params = TEMPERATURE_MODEL_PARAMETERS['sapm']['open_rack_glass_glass']
 
-    def _simulate_weather_params(self, status):
-        mapping = {
-            "sunny":  {"temp": 32, "wind": 2.0, "cloud": 0.0},
-            "mild":   {"temp": 28, "wind": 3.0, "cloud": 0.2},
-            "cloudy": {"temp": 26, "wind": 4.0, "cloud": 0.6},
-            "rainy":  {"temp": 24, "wind": 5.0, "cloud": 0.9},
-            "stormy": {"temp": 22, "wind": 8.0, "cloud": 1.0}
-        }
-        base = mapping.get(status, mapping["mild"])
-        return {
-            'temp_air': base["temp"] + np.random.uniform(-2, 2),
-            'wind_speed': max(0, base["wind"] + np.random.uniform(-1, 1)),
-            'cloud_opacity': base["cloud"]
-        }
+# --- HELPER FUNCTIONS ---
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
 
-    def calculate_generation(self, current_time, weather_status):
-        if not HAS_PVLIB:
-            return 0.0
 
-        env_params = self._simulate_weather_params(weather_status)
-        temp_air = env_params['temp_air']
-        wind_speed = env_params['wind_speed']
-        cloud_opacity = env_params['cloud_opacity']
+def get_tiered_price(hour: int, tiers: List[Tuple[int, float]]) -> float:
+    for i in range(len(tiers)):
+        start, price = tiers[i]
+        next_start = tiers[i + 1][0] if i + 1 < len(tiers) else 24
+        if start <= hour < next_start:
+            return price
+    return tiers[-1][1]
 
-        times = pd.DatetimeIndex([current_time])
-        solpos = self.location.get_solarposition(times)
-        zenith = solpos['apparent_zenith'].values[0]
 
-        if zenith > 90:
-            return 0.0
+def compute_pv_power_with_weather(times, latitude, longitude, tz, surface_tilt, surface_azimuth,
+                                  module_parameters, inverter_parameters=None):
+    if HAS_PVLIB:
+        try:
+            loc = Location(latitude, longitude, tz=tz)
+            # Localize timestamps
+            times_tz = times.tz_localize(tz) if times.tz is None else times.tz_convert(tz)
 
-        linke_turbidity = 3.0 + (cloud_opacity * 2)
-        clearsky = self.location.get_clearsky(times, model='ineichen', linke_turbidity=linke_turbidity)
-        ghi_clearsky = clearsky['ghi'].values[0]
+            cs = loc.get_clearsky(times_tz, model='ineichen')
+            ghi_used = cs['ghi']
+            dni, dhi = cs['dni'], cs['dhi']
 
-        ghi_real = ghi_clearsky * (1 - cloud_opacity * 0.8)
+            solpos = loc.get_solarposition(times_tz)
+            poa = get_total_irradiance(surface_tilt, surface_azimuth, solpos['zenith'], solpos['azimuth'],
+                                       dni=dni, ghi=ghi_used, dhi=dhi, model='haydavies')
+            poa_global = poa['poa_global']
 
-        cell_temp = pvlib.temperature.sapm_cell(
-            poa_global=ghi_real,
-            temp_air=temp_air,
-            wind_speed=wind_speed,
-            **self.temp_params
-        )
+            temp_air = 25.0
+            wind_speed = 2.0
+            celltemp = sapm_cell(poa_global, temp_air, wind_speed, u0=25.0, u1=6.0)
+            temp_cell = celltemp['temp_cell']
 
-        temp_loss = 1 + self.temp_coeff * (cell_temp - 25)
-        power_output = self.capacity * (ghi_real / 1000.0) * temp_loss
+            pdc0 = float(module_parameters.get('pdc0', 1.0))
+            gamma_pdc = float(module_parameters.get('gamma_pdc', -0.004))
+            p_dc = pvwatts_dc(poa_global, temp_cell, pdc0, gamma_pdc=gamma_pdc, temp_ref=25.0)
 
-        return max(0.0, power_output)
+            inv_eff = float(module_parameters.get('inv_eff', 0.96))
+            p_ac = p_dc * inv_eff
 
-class SmartHomeEnv(gym.Env):
-    metadata = {'render.modes': ['human']}
+            return pd.DataFrame({'p_ac': p_ac.clip(lower=0.0).values}, index=times)
+        except Exception as e:
+            print(f"PVLib calculation error: {e}. Falling back to simple model.")
+            # Fallback will happen below
 
-    def __init__(self, price_profile, pv_profile, config, forecast_horizon=3):
-        super().__init__()
-        self.price = np.array(price_profile)
-        self.pv = np.array(pv_profile)
-        self.cfg = config
-        self.T = len(self.price)
-        self.forecast_horizon = forecast_horizon
-        self.behavior = None
+    # Fallback simple logic
+    pdc0 = float(module_parameters.get('pdc0', 1.0))
+    inv_eff = float(module_parameters.get('inv_eff', 0.96))
+    vals = []
+    for t in times:
+        hour = t.hour + t.minute / 60.0
+        if 6 <= hour <= 18:
+            vals.append(pdc0 * math.sin(math.pi * (hour - 6) / 12) * inv_eff)
+        else:
+            vals.append(0.0)
+    return pd.DataFrame({'p_ac': vals}, index=times)
 
-        self.weather_states = ["sunny", "mild", "cloudy", "rainy", "stormy"]
-        self.weather_transition = {
-            "sunny": [0.6, 0.25, 0.1, 0.04, 0.01],
-            "mild": [0.2, 0.5, 0.2, 0.08, 0.02],
-            "cloudy": [0.1, 0.2, 0.4, 0.2, 0.1],
-            "rainy": [0.05, 0.1, 0.25, 0.4, 0.2],
-            "stormy": [0.02, 0.08, 0.2, 0.3, 0.4]
-        }
 
-        self.pv_physics = AdvancedPV(latitude=10.8, longitude=106.6, panel_capacity_kw=5.0)
-        self.start_date = pd.Timestamp('2025-01-01 00:00')
+class AdvancedHumanBehaviorGenerator:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.people = config.get('residents', [])
+        self.shiftable_devices = config.get('shiftable_devices', {'washing_machine': 1.0, 'dishwasher': 1.0})
+        self.must_run_base = config.get('must_run_base', 0.2)
 
-        self.time_step = 1.0
-        self.total_cost = 0.0
-        self.total_energy_bought = 0.0
+    def generate_for_times(self, times: pd.DatetimeIndex) -> List[Dict]:
+        schedules = []
+        for t in times:
+            hour = int(t.hour)
+            n_home = 0  # Simplified
+            if 18 <= hour <= 23 or 6 <= hour <= 8:
+                n_home = 2
 
-        self.N_ad = len(config.get('adjustable', []))
+            base = self.must_run_base + 0.15 * n_home
+            if 18 <= hour <= 22: base += 0.6
+
+            shiftable = {}
+            for name, p in self.shiftable_devices.items():
+                shiftable[name] = p if np.random.rand() < 0.1 else 0.0
+
+            schedules.append({'must_run': base, 'shiftable': shiftable, 'n_home': n_home})
+        return schedules
+
+
+class SmartHomeEnv:
+    def __init__(self, price_profile, pv_profile, config: Dict):
+        self.config = config
+
+        # Inputs from external source
+        self.price_profile_input = price_profile
+        self.pv_profile_input = pv_profile
+
+        self.time_step_h = config.get('time_step_hours', 1.0)
+        self.battery = config.get('battery', {'capacity_kwh': 10.0})
+        self.C_bat = float(self.battery['capacity_kwh'])
+        self.soc = float(self.battery.get('soc_init', 0.5))
+
+        self.pv_config = config.get('pv_config', {})
+        self.price_tiers = config.get('price_tiers', [])
+
+        self.behavior = config.get('behavior', {})
+        self.behavior_gen = AdvancedHumanBehaviorGenerator(self.behavior)
+
+        self.sim_start = pd.to_datetime(config.get('sim_start', '2025-01-01'))
+        # Fix Attribute Error by aliasing
+        self.start_time = self.sim_start
+
+        self.sim_steps = int(config.get('sim_steps', 24))
+        # Fix Pandas Warning: Use 'h' instead of 'H'
+        self.sim_freq = config.get('sim_freq', '1h')
+
+        # Action Space
         self.N_su = len(config.get('shiftable_su', []))
         self.N_si = len(config.get('shiftable_si', []))
 
-        obs_len = 4 + 2 * self.forecast_horizon + self.N_si + self.N_su
-        self.observation_space = spaces.Box(low=-1e6, high=1e6, shape=(obs_len,), dtype=np.float32)
-        self.action_space = spaces.MultiBinary(self.N_su + self.N_si)
+        if self.N_su + self.N_si == 0:
+            num_shiftable = len(self.behavior.get('shiftable_devices', {}))
+        else:
+            num_shiftable = self.N_su + self.N_si
 
-    def set_month_behavior(self, month_behavior):
-        self.month_behavior = month_behavior
-        self.current_day = 0
-        self.current_behavior = month_behavior[self.current_day]
+        if num_shiftable > 0:
+            self.action_space = spaces.MultiBinary(num_shiftable)
+        else:
+            self.action_space = spaces.Discrete(1)
 
-    def _update_behavior_for_new_day(self):
-        if hasattr(self, "month_behavior"):
-            self.current_day = (self.current_day + 1) % len(self.month_behavior)
-            self.current_behavior = self.month_behavior[self.current_day]
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(7,), dtype=np.float32)
 
-    def reset(self):
+        # Internal placeholders
+        self.times = None
+        self.pv_profile = None
+        self.price_profile = None
+        self.load_schedules = None
+
+        # Trigger init logic
+        self._reset_internal()
+
+    def _reset_internal(self):
+        self.times = pd.date_range(start=self.sim_start, periods=self.sim_steps, freq=self.sim_freq)
+
+        # 1. PV Logic
+        if self.pv_profile_input is not None and np.sum(self.pv_profile_input) > 0.1:
+            # Use provided input (Fast mode)
+            req_len = len(self.times)
+            if len(self.pv_profile_input) >= req_len:
+                self.pv_profile = np.array(self.pv_profile_input[:req_len])
+            else:
+                self.pv_profile = np.pad(self.pv_profile_input, (0, req_len - len(self.pv_profile_input)))
+        else:
+            # Calculate Physics
+            pvdf = compute_pv_power_with_weather(
+                self.times,
+                latitude=self.pv_config.get('latitude', 10.7),
+                longitude=self.pv_config.get('longitude', 106.6),
+                tz=self.pv_config.get('tz', 'Asia/Ho_Chi_Minh'),
+                surface_tilt=self.pv_config.get('surface_tilt', 10),
+                surface_azimuth=self.pv_config.get('surface_azimuth', 180),
+                module_parameters=self.pv_config.get('module_parameters', {})
+            )
+            self.pv_profile = pvdf['p_ac'].values
+
+        # 2. Price Logic
+        if self.price_profile_input is not None and len(self.price_profile_input) > 0:
+            self.price_profile = np.array(self.price_profile_input[:self.sim_steps])
+        else:
+            prices = [get_tiered_price(t.hour, self.price_tiers) for t in self.times]
+            self.price_profile = np.array(prices)
+
+        # 3. Load Logic
+        self.load_schedules = self.behavior_gen.generate_for_times(self.times)
+
         self.t = 0
-        bat = self.cfg.get('battery', {})
-        self.SOC = bat.get('soc0', 0.5)
-        self.Ot_si = [0] * self.N_si
-        self.su_started = [False] * self.N_su
-        self.su_remaining = [self.cfg['shiftable_su'][i]['L'] for i in range(self.N_su)]
-        self.total_cost = 0.0
-        self.total_energy_bought = 0.0
-        self.current_weather = "mild"
-        self.weather_series = []
-
-        if hasattr(self, "current_behavior"):
-            self.behavior = self.current_behavior
-        elif not hasattr(self, 'behavior') or self.behavior is None:
-            hb_single = HumanBehavior(T=self.T, weather=self.current_weather)
-            behavior_data = hb_single.generate_daily_behavior(sample_device_states=True)
-            self.behavior = behavior_data
-
-        for t in range(self.T):
-            probs = self.weather_transition[self.current_weather]
-            self.current_weather = np.random.choice(self.weather_states, p=probs)
-            self.weather_series.append(self.current_weather)
-
-        return self._get_obs()
+        self.soc = float(self.battery.get('soc_init', 0.5))
 
     def _get_obs(self):
-        t_norm = self.t / max(1, self.T - 1)
-        rho = self.price[self.t]
+        idx = min(self.t, self.sim_steps - 1)
+        hour = int(self.times[idx].hour)
 
-        current_sim_time = self.start_date + pd.Timedelta(hours=self.t)
-        pv_now = self.pv_physics.calculate_generation(current_sim_time, self.weather_series[self.t])
+        must_run = float(self.load_schedules[idx]['must_run'])
+        n_home = self.load_schedules[idx]['n_home']
 
-        forecast_prices = self.price[self.t:min(self.t + self.forecast_horizon, self.T)]
-        forecast_pv = []
+        # Safe access to PV
+        pv_now = float(self.pv_profile[idx]) if self.pv_profile is not None else 0.0
 
-        for k in range(self.forecast_horizon):
-            idx = min(self.t + k, self.T - 1)
-            f_time = self.start_date + pd.Timedelta(hours=idx)
-            f_weather = self.weather_series[idx]
-            forecast_pv.append(self.pv_physics.calculate_generation(f_time, f_weather))
-        forecast_pv = np.array(forecast_pv)
-
-        if len(forecast_prices) < self.forecast_horizon:
-            forecast_prices = np.pad(forecast_prices, (0, self.forecast_horizon - len(forecast_prices)), 'edge')
-        if len(forecast_pv) < self.forecast_horizon:
-            forecast_pv = np.pad(forecast_pv, (0, self.forecast_horizon - len(forecast_pv)), 'edge')
-
-        obs = [t_norm, rho, pv_now, self.SOC]
-        obs += forecast_prices.tolist() + forecast_pv.tolist()
-        obs += self.Ot_si
-        obs += [1.0 if s else 0.0 for s in self.su_started]
-        return np.array(obs, dtype=np.float32)
-
-    def step(self, action):
-        action = np.array(action).astype(int)
-        act_su = action[:self.N_su].tolist() if self.N_su > 0 else []
-        act_si = action[self.N_su:].tolist() if self.N_si > 0 else []
-
-        P_su_t = sum(su["rate"] for i, su in enumerate(self.cfg["shiftable_su"])
-                     if self.t >= su["t_s"] and self.t <= su["t_f"] and act_su[i] == 1)
-        P_si_t = sum(si["rate"] for i, si in enumerate(self.cfg["shiftable_si"])
-                     if self.t >= si["t_s"] and self.t <= si["t_f"] and act_si[i] == 1)
-
-        P_cr_t = self.cfg.get("critical", [0.0] * self.T)[self.t]
-        P_ad_t = sum(ad["P_com"] for ad in self.cfg.get("adjustable", []))
-
-        P_human_t = 0.0
-        device_states_t = {}
-
-        if isinstance(self.behavior, dict):
-            device_states = self.behavior.get("device_states")
-            if device_states:
-                for device_name, power in DEVICE_POWER_MAP.items():
-                    is_on = device_states.get(device_name, [False]*self.T)[self.t]
-                    device_states_t[device_name] = is_on
-                    if is_on:
-                        is_agent_controlled = False
-                        if device_name == "washing_machine": is_agent_controlled = True
-                        if device_name == "dishwasher": is_agent_controlled = True
-                        if device_name == "ev_charger": is_agent_controlled = True
-
-                        if not is_agent_controlled:
-                            P_human_t += power
-
-        P_load = P_cr_t + P_ad_t + P_su_t + P_si_t + P_human_t
-
-        current_sim_time = self.start_date + pd.Timedelta(hours=self.t)
-        P_pv = self.pv_physics.calculate_generation(current_sim_time, self.weather_series[self.t])
-
-        bat = self.cfg.get("battery", {})
-        soc_min = bat.get("soc_min", 0.1)
-        soc_max = bat.get("soc_max", 0.9)
-        eta_ch = bat.get("eta_ch", 0.95)
-        eta_dis = bat.get("eta_dis", 0.95)
-
-        P_ch, P_dis = 0.0, 0.0
-        if P_pv >= P_load:
-            P_surplus = P_pv - P_load
-            if self.SOC < soc_max:
-                P_ch = P_surplus
-                self.SOC = min(soc_max, self.SOC + eta_ch * P_ch / self.T)
+        horizon = 6
+        end_idx = min(self.sim_steps, idx + 1 + horizon)
+        if idx + 1 < self.sim_steps and self.pv_profile is not None:
+            future_pv_sum = float(np.sum(self.pv_profile[idx + 1: end_idx]))
         else:
-            P_deficit = P_load - P_pv
-            if self.SOC > soc_min:
-                P_dis = min(P_deficit, (self.SOC - soc_min) * self.T / eta_dis)
-                self.SOC = max(soc_min, self.SOC - P_dis * eta_dis / self.T)
+            future_pv_sum = 0.0
 
-        supply = P_pv + P_dis
-        demand = P_load + P_ch
-        self.P_grid = max(0, demand - supply)
+        hour_sin = math.sin(2 * math.pi * hour / 24)
+        hour_cos = math.cos(2 * math.pi * hour / 24)
 
-        price = self.price[self.t]
-        cost = self.P_grid * price
-        self.total_cost += cost
-        self.total_energy_bought += self.P_grid * self.time_step
+        return np.array([self.soc, pv_now, must_run, future_pv_sum, hour_sin, hour_cos, n_home], dtype=np.float32)
 
-        hour = self.t % 24
-        is_night = (hour < 6 or hour >= 18)
-        penalty_unmet = -10.0 * max(0, demand - supply - self.P_grid)
-        penalty_battery = -0.05 * (abs(P_ch) + abs(P_dis))
+    def reset(self):
+        self._reset_internal()
+        return self._get_obs(), {}
 
-        reward = -cost + penalty_unmet + penalty_battery
+    def step(self, action: Optional[List[int]] = None):
+        idx = self.t
+        must = float(self.load_schedules[idx]['must_run'])
 
-        if is_night:
-            if self.P_grid > 0:
-                reward -= 0.2 * cost
-            elif P_dis > 0:
-                reward += 0.05 * P_dis
+        # Simplified Load Calculation
+        p_shiftable_active = 0.0
+        su_list = self.config.get('shiftable_su', [])
+        si_list = self.config.get('shiftable_si', [])
+        all_devs = su_list + si_list
 
-        if 17 <= hour <= 21:
-            reward -= 0.5 * cost
-        if 0.4 <= self.SOC <= 0.8:
-            reward += 0.02
-        reward += 0.03 * min(P_pv, P_load)
+        if action is not None and len(action) > 0:
+            for i, act in enumerate(action):
+                if i < len(all_devs) and act == 1:
+                    p_shiftable_active += all_devs[i]['rate']
 
-        info = {
-            "P_pv": P_pv,
-            "P_load": P_load,
-            "P_ch": P_ch,
-            "P_dis": P_dis,
-            "P_grid": self.P_grid,
-            "SOC": self.SOC,
-            "cost": cost,
-            "is_night": is_night,
-            "weather": self.weather_series[self.t],
-            "P_human": P_human_t,
-            "P_agent_su": P_su_t,
-            "P_agent_si": P_si_t,
-            "device_states": device_states_t
-        }
+        total_load = must + p_shiftable_active
+        pv_gen = float(self.pv_profile[idx])
+        surplus = pv_gen - total_load
+
+        # Battery Logic
+        if surplus >= 0:
+            p_ch = min(surplus, float(self.battery.get('p_charge_max_kw', 3.0)))
+            eta = float(self.battery.get('eta_ch', 0.95))
+            self.soc = clamp(self.soc + (p_ch * eta) / self.C_bat, self.battery['soc_min'], self.battery['soc_max'])
+            grid = -(surplus - p_ch)  # Export rest
+        else:
+            deficit = -surplus
+            p_dis = min(deficit, float(self.battery.get('p_discharge_max_kw', 3.0)))
+            eta = float(self.battery.get('eta_dis', 0.95))
+            kwh_needed = p_dis / eta
+            self.soc = clamp(self.soc - kwh_needed / self.C_bat, self.battery['soc_min'], self.battery['soc_max'])
+            grid = deficit - p_dis  # Import rest
+
+        price = self.price_profile[idx]
+        cost = max(0.0, grid) * price
+        reward = -cost / 1000.0
+        if self.soc <= self.battery['soc_min'] + 0.05:
+            reward -= 0.5
 
         self.t += 1
-        done = (self.t >= self.T)
-        if done:
-            self._update_behavior_for_new_day()
+        done = self.t >= self.sim_steps
 
-        obs = self._get_obs() if not done else np.zeros(self.observation_space.shape, dtype=np.float32)
-        return obs, reward, done, info
-
-    def _solve_one_step(self, P_net_without_ad):
-        rho_b = self.price[self.t]
-        if pulp is None or self.N_ad == 0:
-            P_ad = []
-            for ad in self.cfg.get('adjustable', []):
-                P_ad.append(ad['P_com'] if rho_b < np.mean(self.price) else ad['P_min'])
-            P_ad = np.array(P_ad)
-            P_net = P_net_without_ad + P_ad.sum()
-            if P_net >= 0:
-                return P_ad.tolist(), float(P_net), 0.0
-            else:
-                return P_ad.tolist(), 0.0, float(-P_net)
-
-        prob = pulp.LpProblem('OneStep', pulp.LpMinimize)
-        P_ad_vars = [pulp.LpVariable(f'P_ad_{i}', lowBound=ad['P_min'], upBound=ad['P_max']) for i,ad in enumerate(self.cfg.get('adjustable', []))]
-        P_b_var = pulp.LpVariable('P_b', lowBound=0.0)
-        P_s_var = pulp.LpVariable('P_s', lowBound=0.0)
-        z_b = pulp.LpVariable('z_b', cat='Binary')
-        z_s = pulp.LpVariable('z_s', cat='Binary')
-        bigM = 1e5
-        prob += (P_b_var - P_s_var == P_net_without_ad + pulp.lpSum(P_ad_vars))
-        prob += P_b_var <= z_b * bigM
-        prob += P_s_var <= z_s * bigM
-        prob += z_b + z_s <= 1
-        obj = rho_b * P_b_var - (self.cfg.get('beta',0.5)*rho_b) * P_s_var
-        for i,ad in enumerate(self.cfg.get('adjustable', [])):
-            u = pulp.LpVariable(f'u_{i}', lowBound=0.0)
-            prob += u >= ad['P_com'] - P_ad_vars[i]
-            prob += u >= P_ad_vars[i] - ad['P_com']
-            obj += ad['alpha'] * u
-            obj += rho_b * P_ad_vars[i]
-        prob += obj
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=5)
-        prob.solve(solver)
-        P_ad = [float(pulp.value(v)) if pulp.value(v) is not None else 0.0 for v in P_ad_vars]
-        P_b = float(pulp.value(P_b_var)) if pulp.value(P_b_var) is not None else 0.0
-        P_s = float(pulp.value(P_s_var)) if pulp.value(P_s_var) is not None else 0.0
-        return P_ad, P_b, P_s
-
-    def render(self, mode='human'):
-        print(f"t={self.t}, total_cost={self.total_cost:.3f}")
-
-
-if __name__ == "__main__":
-    T = 24
-    price = 0.1 + 0.2 * np.random.rand(T)
-    pv = np.clip(1.5 * np.sin(np.linspace(0, 3.14, T)) + 0.2*np.random.randn(T), 0, None)
-    config = {
-        'critical': [0.3]*T,
-        'adjustable': [
-            {'P_min':0.1, 'P_max':1.5, 'P_com':1.2, 'alpha':0.06},
-            {'P_min':0.0, 'P_max':1.2, 'P_com':1.0, 'alpha':0.12}
-        ],
-        'shiftable_su': [ {'rate':0.5, 'L':2, 't_s':6, 't_f':20}, {'rate':0.6, 'L':1, 't_s':8, 't_f':22} ],
-        'shiftable_si': [ {'rate':1.0, 'E':4.0, 't_s':0, 't_f':23} ],
-        'beta': 0.5,
-        'battery': {'soc0':0.5, 'soc_min':0.1, 'soc_max':0.9},
-        "reward_mode": "advanced"
-    }
-    env = SmartHomeEnv(price, pv, config)
-
-    print("--- Chạy Demo 1 ngày (Single-day) ---")
-    obs = env.reset() # reset() sẽ tự tạo behavior fallback
-    done = False
-    while not done:
-        action = np.random.randint(0,2, size=env.N_su + env.N_si)
-        obs, rew, done, info = env.step(action)
-    print("Episode finished, total cost", env.total_cost)
+        info = {'cost': cost, 'soc': self.soc}
+        return self._get_obs(), reward, done, False, info
