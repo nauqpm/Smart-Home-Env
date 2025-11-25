@@ -4,12 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="refactor lwbo heuristic and il">
-      <change afterPath="$PROJECT_DIR$/test_agent_visual.py" afterDir="false" />
+    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="test the il agent and still have a wrong result">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lbwo_solver.py" beforeDir="false" afterPath="$PROJECT_DIR$/lbwo_solver.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/smart_home_env.py" beforeDir="false" afterPath="$PROJECT_DIR$/smart_home_env.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/train_il_bc.py" beforeDir="false" afterPath="$PROJECT_DIR$/train_il_bc.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -138,7 +135,8 @@
       <workItem from="1763908515229" duration="3408000" />
       <workItem from="1763948618760" duration="2724000" />
       <workItem from="1763972458822" duration="5009000" />
-      <workItem from="1763994241117" duration="8289000" />
+      <workItem from="1763994241117" duration="9399000" />
+      <workItem from="1764035644893" duration="2228000" />
     </task>
     <task id="LOCAL-00001" summary="Create an environment of smart home">
       <option name="closed" value="true" />
@@ -196,7 +194,15 @@
       <option name="project" value="LOCAL" />
       <updated>1764001556194</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="test the il agent and still have a wrong result">
+      <option name="closed" value="true" />
+      <created>1764005186960</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1764005186960</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -220,7 +226,8 @@
     <MESSAGE value="add event scheduler" />
     <MESSAGE value="add lwbo heuristic and il" />
     <MESSAGE value="refactor lwbo heuristic and il" />
-    <option name="LAST_COMMIT_MESSAGE" value="refactor lwbo heuristic and il" />
+    <MESSAGE value="test the il agent and still have a wrong result" />
+    <option name="LAST_COMMIT_MESSAGE" value="test the il agent and still have a wrong result" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/SmartHomeEnv$milp_expert.coverage" NAME="milp_expert Coverage Results" MODIFIED="1760362880669" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

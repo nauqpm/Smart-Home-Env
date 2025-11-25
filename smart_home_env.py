@@ -40,6 +40,7 @@ def get_tiered_price(hour: int, tiers: List[Tuple[int, float]]) -> float:
     return tiers[-1][1]
 
 
+# [SỬA ĐỔI] Hàm tính PV giữ nguyên logic cũ để tránh lỗi
 def compute_pv_power_with_weather(times, latitude, longitude, tz, surface_tilt, surface_azimuth,
                                   module_parameters, inverter_parameters=None):
     if HAS_PVLIB:
@@ -87,6 +88,7 @@ def compute_pv_power_with_weather(times, latitude, longitude, tz, surface_tilt, 
     return pd.DataFrame({'p_ac': vals}, index=times)
 
 
+# [SỬA ĐỔI] Tích hợp logic sinh nhiệt độ và n_home
 class AdvancedHumanBehaviorGenerator:
     def __init__(self, config: Dict):
         self.config = config
@@ -98,9 +100,8 @@ class AdvancedHumanBehaviorGenerator:
         schedules = []
         for t in times:
             hour = int(t.hour)
-            n_home = 0  # Simplified
-            if 18 <= hour <= 23 or 6 <= hour <= 8:
-                n_home = 2
+            # Logic đơn giản hóa: Người ở nhà buổi tối và đêm
+            n_home = 2 if (17 <= hour <= 23 or 0 <= hour <= 7) else 0
 
             base = self.must_run_base + 0.15 * n_home
             if 18 <= hour <= 22: base += 0.6
@@ -109,7 +110,10 @@ class AdvancedHumanBehaviorGenerator:
             for name, p in self.shiftable_devices.items():
                 shiftable[name] = p if np.random.rand() < 0.1 else 0.0
 
-            schedules.append({'must_run': base, 'shiftable': shiftable, 'n_home': n_home})
+            # [NEW] Giả lập nhiệt độ ngoài trời
+            temp_out = 30.0 + 5.0 * math.sin(math.pi * (hour - 9) / 12)
+
+            schedules.append({'must_run': base, 'shiftable': shiftable, 'n_home': n_home, 'temp_out': temp_out})
         return schedules
 
 
@@ -140,21 +144,28 @@ class SmartHomeEnv:
         # Fix Pandas Warning: Use 'h' instead of 'H'
         self.sim_freq = config.get('sim_freq', '1h')
 
-        # Action Space
-        self.N_su = len(config.get('shiftable_su', []))
-        self.N_si = len(config.get('shiftable_si', []))
+        # [SỬA ĐỔI] Action Space bao gồm cả Adjustable (AC)
+        self.su_devs = config.get('shiftable_su', [])
+        self.si_devs = config.get('shiftable_si', [])
+        self.ad_devs = config.get('adjustable', [])
 
-        if self.N_su + self.N_si == 0:
-            num_shiftable = len(self.behavior.get('shiftable_devices', {}))
-        else:
-            num_shiftable = self.N_su + self.N_si
+        self.N_su = len(self.su_devs)
+        self.N_si = len(self.si_devs)
+        self.N_ad = len(self.ad_devs)
 
-        if num_shiftable > 0:
-            self.action_space = spaces.MultiBinary(num_shiftable)
+        total_action = self.N_su + self.N_si + self.N_ad
+
+        if total_action > 0:
+            self.action_space = spaces.MultiBinary(total_action)
         else:
             self.action_space = spaces.Discrete(1)
 
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(7,), dtype=np.float32)
+        # [SỬA ĐỔI] Obs Space thêm Occupancy và TempOut (8 chiều)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32)
+
+        # Tracking status
+        self.su_status = np.zeros(self.N_su)
+        self.si_status = np.zeros(self.N_si)
 
         # Internal placeholders
         self.times = None
@@ -177,7 +188,7 @@ class SmartHomeEnv:
             else:
                 self.pv_profile = np.pad(self.pv_profile_input, (0, req_len - len(self.pv_profile_input)))
         else:
-            # Calculate Physics
+            # [SỬA LỖI QUAN TRỌNG] Gọi hàm compute_pv đúng cách, tránh duplicate arguments
             pvdf = compute_pv_power_with_weather(
                 self.times,
                 latitude=self.pv_config.get('latitude', 10.7),
@@ -202,12 +213,18 @@ class SmartHomeEnv:
         self.t = 0
         self.soc = float(self.battery.get('soc_init', 0.5))
 
+        # Reset tracking
+        self.su_status.fill(0)
+        self.si_status.fill(0)
+
     def _get_obs(self):
         idx = min(self.t, self.sim_steps - 1)
         hour = int(self.times[idx].hour)
 
         must_run = float(self.load_schedules[idx]['must_run'])
+        # [NEW] Lấy thông tin môi trường
         n_home = self.load_schedules[idx]['n_home']
+        temp_out = self.load_schedules[idx]['temp_out']
 
         # Safe access to PV
         pv_now = float(self.pv_profile[idx]) if self.pv_profile is not None else 0.0
@@ -222,7 +239,9 @@ class SmartHomeEnv:
         hour_sin = math.sin(2 * math.pi * hour / 24)
         hour_cos = math.cos(2 * math.pi * hour / 24)
 
-        return np.array([self.soc, pv_now, must_run, future_pv_sum, hour_sin, hour_cos, n_home], dtype=np.float32)
+        # [NEW] Obs vector 8 chiều
+        return np.array([self.soc, pv_now, must_run, future_pv_sum, hour_sin, hour_cos, n_home, temp_out],
+                        dtype=np.float32)
 
     def reset(self):
         self._reset_internal()
@@ -231,19 +250,51 @@ class SmartHomeEnv:
     def step(self, action: Optional[List[int]] = None):
         idx = self.t
         must = float(self.load_schedules[idx]['must_run'])
+        n_home = self.load_schedules[idx]['n_home']
+        temp_out = self.load_schedules[idx]['temp_out']
 
         # Simplified Load Calculation
-        p_shiftable_active = 0.0
-        su_list = self.config.get('shiftable_su', [])
-        si_list = self.config.get('shiftable_si', [])
-        all_devs = su_list + si_list
+        p_dev_load = 0.0
+        comfort_penalty = 0.0
 
-        if action is not None and len(action) > 0:
-            for i, act in enumerate(action):
-                if i < len(all_devs) and act == 1:
-                    p_shiftable_active += all_devs[i]['rate']
+        if action is not None:
+            # 1. SU Devices (Máy giặt)
+            for i in range(self.N_su):
+                if action[i] == 1:
+                    if self.su_status[i] < self.su_devs[i]['L']:
+                        p_dev_load += self.su_devs[i]['rate']
+                        self.su_status[i] += 1
+                    else:
+                        comfort_penalty += 0.5  # Chạy thừa
 
-        total_load = must + p_shiftable_active
+            # 2. SI Devices (EV)
+            offset_si = self.N_su
+            for i in range(self.N_si):
+                if action[offset_si + i] == 1:
+                    if self.si_status[i] < self.si_devs[i]['E']:
+                        p_dev_load += self.si_devs[i]['rate']
+                        self.si_status[i] += self.si_devs[i]['rate'] * self.time_step_h
+                    else:
+                        comfort_penalty += 0.5  # Sạc thừa
+
+            # 3. Adjustable (AC) - [NEW LOGIC]
+            offset_ad = self.N_su + self.N_si
+            for i in range(self.N_ad):
+                act = action[offset_ad + i]
+                dev = self.ad_devs[i]
+                if act == 1:
+                    p_dev_load += dev['P_com']
+
+                # Kiểm tra tiện nghi nhiệt độ
+                if n_home > 0:
+                    # Nóng (>28) mà tắt AC -> Phạt nặng
+                    if temp_out > 28.0 and act == 0:
+                        comfort_penalty += 5.0
+                    # Lạnh (<25) mà bật AC -> Phạt nhẹ
+                    if temp_out < 25.0 and act == 1:
+                        comfort_penalty += 1.0
+
+        total_load = must + p_dev_load
         pv_gen = float(self.pv_profile[idx])
         surplus = pv_gen - total_load
 
@@ -263,12 +314,31 @@ class SmartHomeEnv:
 
         price = self.price_profile[idx]
         cost = max(0.0, grid) * price
-        reward = -cost / 1000.0
+
+        # [NEW] Reward bao gồm cả Comfort Penalty
+        reward = -cost / 1000.0 - comfort_penalty
+
         if self.soc <= self.battery['soc_min'] + 0.05:
             reward -= 0.5
 
         self.t += 1
         done = self.t >= self.sim_steps
 
-        info = {'cost': cost, 'soc': self.soc}
+        # [NEW] Check Task Completion khi Done
+        if done:
+            for i in range(self.N_su):
+                if self.su_status[i] < self.su_devs[i]['L']: reward -= 20.0
+            for i in range(self.N_si):
+                if self.si_status[i] < self.si_devs[i]['E'] * 0.9: reward -= 20.0
+
+        # Info trả về nhiều thông tin hơn để debug
+        info = {
+            'cost': cost,
+            'soc': self.soc,
+            'temp': temp_out,
+            'n_home': n_home,
+            'pv': pv_gen,
+            'load': total_load,
+            'grid': grid
+        }
         return self._get_obs(), reward, done, False, info

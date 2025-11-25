@@ -1,4 +1,3 @@
-# test_agent_visual.py
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,31 +12,41 @@ def visualize_agent_behavior():
     try:
         ckpt = torch.load(model_path, map_location='cpu')
     except FileNotFoundError:
-        print("Chưa thấy file model. Hãy chạy train trước!")
+        print("⚠️ Chưa thấy file model 'bc_policy.pt'.")
         return
 
-    model = BCPolicy(ckpt['obs_dim'], ckpt['action_dim'])
+    # Lấy kích thước từ checkpoint để init model đúng
+    obs_dim = ckpt['obs_dim']
+    action_dim = ckpt['action_dim']
+
+    model = BCPolicy(obs_dim, action_dim)
     model.load_state_dict(ckpt['model_state_dict'])
     model.eval()
 
-    # 2. Setup Env (Chọn 1 ngày cố định để test)
+    # 2. Setup Env
+    # Reset Seed để đảm bảo test ngẫu nhiên
+    import random
+    import time
+    seed = int(time.time())
+    random.seed(seed)
+    np.random.seed(seed)
+
     cfg = DEFAULT_CFG.copy()
-    cfg['sim_start'] = "2025-06-15"  # Một ngày mùa hè
+    cfg['sim_start'] = "2025-06-20"  # Ngày hè nóng nực
     price, pv = get_env_inputs()
 
-    # Quan trọng: Reset để Env tự tính toán PV
     env = SmartHomeEnv(price, pv, cfg)
     obs, _ = env.reset()
 
-    # 3. Chạy mô phỏng
-    prices = []
-    pvs = []
-    actions = []
-    socs = []
+    # 3. Chạy mô phỏng & Ghi log chi tiết
+    history = {
+        "price": [], "pv": [], "temp": [], "n_home": [],
+        "action_su": [], "action_si": [], "action_ac": [],
+        "reward": [], "soc": []
+    }
 
     done = False
-    print("\n--- Bắt đầu chạy thử Agent ---")
-    print("Time | Price | PV   | Action (Dev 1, 2, 3...)")
+    print(f"\n--- CHẠY THỬ NGHIỆM (Seed: {seed}) ---")
 
     while not done:
         # Agent suy nghĩ
@@ -46,49 +55,86 @@ def visualize_agent_behavior():
             logits = model(obs_tensor)
             probs = torch.sigmoid(logits).numpy().squeeze()
 
-        # Quyết định (Ngưỡng 0.5)
         action = (probs > 0.5).astype(int).tolist()
         if isinstance(action, int): action = [action]
 
-        # Ghi log
+        # Lấy thông tin môi trường hiện tại để log
         idx = min(env.t, 23)
-        p_now = env.price_profile[idx] if env.price_profile is not None else 0
-        pv_now = env.pv_profile[idx] if env.pv_profile is not None else 0
+        t_info = env.load_schedules[idx]  # {'temp_out': ..., 'n_home': ...}
 
-        prices.append(p_now)
-        pvs.append(pv_now)
-        actions.append(action)
-        socs.append(env.soc)
+        history["price"].append(env.price_profile[idx])
+        history["pv"].append(env.pv_profile[idx])
+        history["temp"].append(t_info['temp_out'])
+        history["n_home"].append(t_info['n_home'])
+        history["soc"].append(env.soc)
 
-        print(f"{idx:02d}:00| {p_now:.3f} | {pv_now:.2f} | {action}")
+        # Phân tách Action (Giả sử: 2 SU, 1 SI, 1 AC = 4 actions)
+        # Cần map đúng với config của bạn
+        # Config mặc định: 2 SU (Giặt, Rửa), 1 SI (Xe), 0 AC (Cũ) -> Check lại logic đếm
+        # Nếu config mới: 2 SU, 1 SI, 1 AC
 
-        obs, r, done, _, _ = env.step(action)
+        su_len = env.N_su
+        si_len = env.N_si
 
-    # 4. Vẽ biểu đồ
-    actions = np.array(actions)
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+        # Lưu action từng loại để vẽ
+        if len(action) >= su_len + si_len + 1:
+            history["action_su"].append(max(action[:su_len]))  # Max để xem có bật cái nào ko
+            history["action_si"].append(action[su_len])
+            history["action_ac"].append(action[su_len + si_len])
+        else:
+            history["action_su"].append(0)
+            history["action_si"].append(0)
+            history["action_ac"].append(0)
 
-    # Vẽ Giá điện (Nền)
-    ax1.set_xlabel('Giờ trong ngày')
-    ax1.set_ylabel('Giá điện ($)', color='red')
-    ax1.plot(prices, color='red', linestyle='--', label='Price')
-    ax1.tick_params(axis='y', labelcolor='red')
+        obs, r, done, _, info = env.step(action)
+        history["reward"].append(r)
 
-    # Vẽ Hành động (Cột)
-    ax2 = ax1.twinx()
-    ax2.set_ylabel('Trạng thái Bật/Tắt', color='blue')
+    # 4. In kết quả check lỗi
+    print(f"Tổng Reward: {sum(history['reward']):.2f}")
+    print(f"Trạng thái cuối: SU Status={env.su_status}, SI Status={env.si_status}")
 
-    # Vẽ từng thiết bị lệch nhau một chút để dễ nhìn
-    num_devs = actions.shape[1]
-    for i in range(num_devs):
-        offset = i * 0.05
-        ax2.step(np.arange(24), actions[:, i] + offset, label=f'Dev {i + 1}', where='post', alpha=0.7)
+    # Check Failures
+    if env.su_status[0] < env.su_devs[0]['L']:
+        print("❌ LỖI: Máy giặt chưa chạy xong!")
+    if env.si_status[0] < env.si_devs[0]['E']:
+        print("❌ LỖI: Xe điện chưa sạc đầy!")
 
-    ax2.set_ylim(-0.1, num_devs + 0.5)
-    ax2.legend(loc='upper left')
+    # 5. Vẽ biểu đồ
+    fig, axs = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
 
-    plt.title("Hành vi của Agent: Bật thiết bị lúc nào?")
-    plt.grid(True, alpha=0.3)
+    # Biểu đồ 1: Nhiệt độ & Người & AC
+    ax1 = axs[0]
+    ax1.set_title("Tiện nghi Nhiệt độ (AC)")
+    ax1.plot(history["temp"], color='orange', label='Nhiệt độ ngoài trời')
+    ax1.set_ylabel("Độ C")
+    ax1.axhline(y=28, color='red', linestyle='--', alpha=0.5, label='Ngưỡng nóng (28C)')
+
+    ax1b = ax1.twinx()
+    ax1b.fill_between(range(24), 0, history["n_home"], color='gray', alpha=0.2, label='Người ở nhà')
+    ax1b.step(range(24), history["action_ac"], color='blue', where='post', label='Bật AC')
+    ax1b.set_ylabel("Trạng thái / Số người")
+    ax1b.legend(loc='upper left')
+    ax1.legend(loc='upper right')
+
+    # Biểu đồ 2: Giá điện & Máy giặt/Xe điện
+    ax2 = axs[1]
+    ax2.set_title("Thiết bị vs Giá điện")
+    ax2.plot(history["price"], color='red', linestyle='--', label='Giá điện')
+    ax2.set_ylabel("Giá ($)")
+
+    ax2b = ax2.twinx()
+    ax2b.step(range(24), history["action_su"], color='purple', where='post', label='Máy giặt (SU)')
+    ax2b.step(range(24), history["action_si"], color='green', where='post', label='Sạc xe (SI)')
+    ax2b.set_ylim(-0.1, 1.5)
+    ax2b.legend(loc='upper left')
+
+    # Biểu đồ 3: Reward từng bước
+    ax3 = axs[2]
+    ax3.set_title("Reward từng giờ (Âm nhiều = Bị phạt)")
+    ax3.bar(range(24), history["reward"], color='brown')
+    ax3.set_xlabel("Giờ trong ngày")
+
+    plt.tight_layout()
     plt.show()
 
 
