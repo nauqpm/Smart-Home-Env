@@ -20,6 +20,7 @@ class LBWOSolver:
 
         horizon = 24
         total_reward = 0.0
+        penalty = 0.0
 
         su_configs = env_ref.config.get('shiftable_su', [])
         si_configs = env_ref.config.get('shiftable_si', [])
@@ -46,14 +47,15 @@ class LBWOSolver:
                         rate = si_configs[si_idx]['rate']
                         si_track[si_idx] += rate
 
+                        if si_track[si_idx] > si_configs[si_idx]['E'] + 0.1:
+                            penalty += 5.0
+
             actions_matrix.append(actions_t)
 
         for t in range(horizon):
             obs, r, done, truncated, info = env_ref.step(actions_matrix[t])
             total_reward += r
             if done: break
-
-        penalty = 0.0
 
         for i, cfg in enumerate(su_configs):
             required_hours = cfg['L']
