@@ -1,4 +1,3 @@
-# smart_home_env.py - Fixed Logic for LBWO & IL Training
 import numpy as np
 import pandas as pd
 import math
@@ -7,7 +6,6 @@ from typing import Dict, List, Optional, Tuple
 import gymnasium as gym
 from gymnasium import spaces
 
-# --- OPTIONAL IMPORTS ---
 try:
     import pvlib
     from pvlib.location import Location
@@ -29,7 +27,6 @@ except ImportError:
 logger = logging.getLogger('SmartHomeEnv')
 logger.setLevel(logging.INFO)
 
-# --- HELPER FUNCTIONS ---
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
@@ -354,7 +351,8 @@ class SmartHomeEnv(gym.Env):
             eta = float(self.battery.get('eta_dis', 0.95))
             self.soc = clamp(self.soc - (p_dis/eta)/self.C_bat, self.battery['soc_min'], self.battery['soc_max'])
             grid = deficit - p_dis
-            
+
+        current_weather = self.weather_series[idx] if idx < len(self.weather_series) else "unknown"
         price = self.price_profile[idx]
         cost = max(0.0, grid) * price
         self.total_cost += cost
@@ -374,7 +372,8 @@ class SmartHomeEnv(gym.Env):
                 
         info = {
             'cost': cost, 'soc': self.soc, 'temp': temp_out, 
-            'n_home': n_home, 'pv': pv_gen, 'load': total_load
+            'n_home': n_home, 'pv': pv_gen, 'load': total_load,
+            'weather': current_weather
         }
         
         return self._get_obs() if not done else np.zeros(10, dtype=np.float32), float(reward), done, False, info

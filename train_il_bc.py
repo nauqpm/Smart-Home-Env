@@ -11,7 +11,6 @@ from datetime import timedelta, datetime
 from smart_home_env import SmartHomeEnv
 from lbwo_solver import LBWOSolver
 
-# Config Mặc định
 DEFAULT_CFG = {
     "critical": [0.33] * 24,
     "adjustable": [],
