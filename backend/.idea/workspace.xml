@@ -4,14 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="merge project that solve the conflict in 2 branch">
-      <change afterPath="$PROJECT_DIR$/visualizer_matplotlib.py" afterDir="false" />
+    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="fix the logic of lwbo that il agent find the shorter way">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/human_behavior.py" beforeDir="false" afterPath="$PROJECT_DIR$/human_behavior.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lbwo_solver.py" beforeDir="false" afterPath="$PROJECT_DIR$/lbwo_solver.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/run_episode_plot.py" beforeDir="false" afterPath="$PROJECT_DIR$/run_episode_plot.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/smart_home_env.py" beforeDir="false" afterPath="$PROJECT_DIR$/smart_home_env.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/train_il_bc.py" beforeDir="false" afterPath="$PROJECT_DIR$/train_il_bc.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visualizer.html" beforeDir="false" afterPath="$PROJECT_DIR$/visualizer.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -29,7 +23,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="main" />
+        <entry key="$PROJECT_DIR$" value="Tam" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -144,6 +138,19 @@
       <workItem from="1763994241117" duration="9399000" />
       <workItem from="1764035644893" duration="2228000" />
       <workItem from="1764054265570" duration="5494000" />
+      <workItem from="1764120853049" duration="2015000" />
+      <workItem from="1764126253545" duration="969000" />
+      <workItem from="1764144913573" duration="1045000" />
+      <workItem from="1764515858573" duration="606000" />
+      <workItem from="1764583019916" duration="3891000" />
+      <workItem from="1764645175182" duration="1185000" />
+      <workItem from="1764667644477" duration="2163000" />
+      <workItem from="1764896907674" duration="1804000" />
+      <workItem from="1764931938211" duration="1223000" />
+      <workItem from="1764983268209" duration="661000" />
+      <workItem from="1764989103898" duration="27000" />
+      <workItem from="1764996192253" duration="612000" />
+      <workItem from="1765006354432" duration="3208000" />
     </task>
     <task id="LOCAL-00001" summary="Create an environment of smart home">
       <option name="closed" value="true" />
@@ -217,7 +224,15 @@
       <option name="project" value="LOCAL" />
       <updated>1764056487433</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="fix the logic of lwbo that il agent find the shorter way">
+      <option name="closed" value="true" />
+      <created>1764090823197</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1764090823197</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -243,7 +258,8 @@
     <MESSAGE value="refactor lwbo heuristic and il" />
     <MESSAGE value="test the il agent and still have a wrong result" />
     <MESSAGE value="merge project that solve the conflict in 2 branch" />
-    <option name="LAST_COMMIT_MESSAGE" value="merge project that solve the conflict in 2 branch" />
+    <MESSAGE value="fix the logic of lwbo that il agent find the shorter way" />
+    <option name="LAST_COMMIT_MESSAGE" value="fix the logic of lwbo that il agent find the shorter way" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/SmartHomeEnv$milp_expert.coverage" NAME="milp_expert Coverage Results" MODIFIED="1760362880669" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
