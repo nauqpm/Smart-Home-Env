@@ -1,30 +1,30 @@
+// frontend/src/components/HouseModel.jsx
 import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import useStore from '../stores/useStore';
 
 function HouseModel() {
-  // Ref để truy cập trực tiếp vào mesh 3D
-  const fanRef = useRef();
+  const fanGroupRef = useRef();
   const lightBulbRef = useRef();
 
-  // Lấy trạng thái từ Zustand store
-  // Chỉ lấy những gì cần thiết để tối ưu hiệu năng
+  // Lấy state từ store
   const fanSpeed = useStore((state) => state.deviceState.fan_speed);
   const lightOn = useStore((state) => state.deviceState.light_on);
+  // Giả sử bạn sẽ thêm trạng thái này vào backend sau này
+  const acOn = useStore((state) => state.deviceState.ac_on || false); 
+  const evCharging = useStore((state) => state.deviceState.ev_charging || false);
 
-  // --- ANIMATION LOOP (Chạy mỗi khung hình - 60fps) ---
+  // --- ANIMATION LOOP ---
   useFrame((state, delta) => {
-    // 1. Xoay quạt
-    if (fanRef.current) {
-      // Cộng dồn góc quay. Delta giúp tốc độ ổn định trên mọi màn hình.
-      fanRef.current.rotation.y += fanSpeed * delta; 
+    // Xoay cả nhóm quạt
+    if (fanGroupRef.current) {
+      fanGroupRef.current.rotation.y -= fanSpeed * delta * 3; // Quay ngược chiều kim đồng hồ
     }
 
-    // 2. Đổi màu đèn
+    // Đổi màu đèn
     if (lightBulbRef.current) {
-        // Nếu lightOn = true thì màu vàng sáng, false thì màu xám tối
-        const targetColor = lightOn ? '#ffcc00' : '#333333';
-        const intensity = lightOn ? 2 : 0;
+        const targetColor = lightOn ? '#ffff00' : '#333333'; // Vàng hoặc xám tối
+        const intensity = lightOn ? 1 : 0;
         
         lightBulbRef.current.material.color.set(targetColor);
         lightBulbRef.current.material.emissive.set(targetColor);
@@ -34,33 +34,67 @@ function HouseModel() {
 
   return (
     <group dispose={null}>
-      {/* --- Sàn nhà giả định --- */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2, 0]}>
-        <planeGeometry args={[10, 10]} />
-        <meshStandardMaterial color="#555555" />
-      </mesh>
-
-      {/* --- Giả lập CÁI QUẠT TRẦN (Khối hộp màu xanh) --- */}
-      <group position={[0, 1, 0]}>
-         {/* Trục quạt */}
-        <mesh position={[0, 0.2, 0]}>
-            <cylinderGeometry args={[0.1, 0.1, 0.5]} />
-            <meshStandardMaterial color="gray" />
+      {/* --- A. QUẠT TRẦN CHI TIẾT (Thay cho khối hộp cũ) --- */}
+      <group ref={fanGroupRef} position={[0, 2.4, 0]}> {/* Treo sát trần */}
+         {/* Trục giữa */}
+        <mesh>
+            <cylinderGeometry args={[0.1, 0.1, 0.2, 16]} />
+            <meshStandardMaterial color="#333" />
         </mesh>
-        {/* Cánh quạt quay (Gán ref vào đây) */}
-        <mesh ref={fanRef} scale={[1, 0.1, 0.2]}>
-            <boxGeometry />
-            <meshStandardMaterial color="#00cec9" />
+        {/* 4 Cánh quạt (Dùng vòng lặp để tạo) */}
+        {[0, 1, 2, 3].map((i) => (
+            <mesh key={i} rotation={[0, (Math.PI / 2) * i, 0]} position={[0.8 * Math.cos((Math.PI / 2) * i), 0, -0.8 * Math.sin((Math.PI / 2) * i)]}>
+                <boxGeometry args={[1.6, 0.05, 0.3]} />
+                <meshStandardMaterial color="#666" />
+            </mesh>
+        ))}
+      </group>
+
+      {/* --- B. ĐÈN TRẦN (Bóng vàng) --- */}
+      <group position={[0, 2.4, 0]}> {/* Treo giữa trần */}
+        <mesh ref={lightBulbRef}>
+            <sphereGeometry args={[0.15, 16, 16]} />
+            <meshStandardMaterial color="#333333" />
+        </mesh>
+        <pointLight color="#ffff00" intensity={lightOn ? 1.5 : 0} distance={10} castShadow />
+      </group>
+
+      {/* --- C. ĐIỀU HÒA (AC UNIT) - Mới --- */}
+      <group position={[-1.5, 1.8, 2.05]}> {/* Gắn trên tường trước */}
+        {/* Cục lạnh */}
+        <mesh castShadow>
+            <boxGeometry args={[1.2, 0.5, 0.3]} />
+            <meshStandardMaterial color="white" />
+        </mesh>
+        {/* Khe gió */}
+        <mesh position={[0, -0.1, 0.16]}>
+             <boxGeometry args={[1, 0.1, 0.05]} />
+             <meshStandardMaterial color="#3498db" />
+        </mesh>
+        {/* Đèn báo trạng thái (Xanh=On, Đỏ=Off) */}
+        <mesh position={[0.5, 0.15, 0.16]}>
+            <sphereGeometry args={[0.05]} />
+            <meshStandardMaterial color={acOn ? "#00ff00" : "#ff0000"} emissive={acOn ? "#00ff00" : "#ff0000"} emissiveIntensity={0.5} />
         </mesh>
       </group>
 
-      {/* --- Giả lập CÁI ĐÈN (Khối cầu) --- */}
-      <mesh ref={lightBulbRef} position={[3, 1, 2]}>
-        <sphereGeometry args={[0.3, 32, 32]} />
-        <meshStandardMaterial color="#333333" />
-        {/* Thêm point light để nó chiếu sáng thật sự */}
-        {lightOn && <pointLight color="#ffcc00" intensity={1.5} distance={5} />}
-      </mesh>
+      {/* --- D. XE ĐIỆN & SẠC - Mới --- */}
+      <group position={[3.5, 0.5, 0]}> {/* Đặt bên cạnh nhà */}
+          {/* Cái xe giả định */}
+          <mesh castShadow receiveShadow>
+              <boxGeometry args={[2, 1, 3.5]} />
+              <meshStandardMaterial color="#34495e" />
+          </mesh>
+          
+          {/* Dây sạc (Chỉ hiện khi evCharging = true) */}
+          {evCharging && (
+            <mesh position={[-1.5, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+                {/* Nối từ xe vào tường nhà */}
+                <cylinderGeometry args={[0.05, 0.05, 3]} /> 
+                <meshStandardMaterial color="orange" />
+            </mesh>
+          )}
+      </group>
     </group>
   );
 }
