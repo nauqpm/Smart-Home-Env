@@ -4,22 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="merge project that solve the conflict in 2 branch">
-      <change afterPath="$PROJECT_DIR$/eval.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/rl_ppo_hybrid.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/rl_ppo_hybrid_new.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.name" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.name" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_11_25_2025_7_05_PM_[Changes]/shelved.patch" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_11_25_2025_7_05_PM__Changes_.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lbwo_solver.py" beforeDir="false" afterPath="$PROJECT_DIR$/lbwo_solver.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_smart_home.zip" beforeDir="false" afterPath="$PROJECT_DIR$/ppo_smart_home.zip" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_1/events.out.tfevents.1764072803.LAPTOP-R455T5D2.3408.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_2/events.out.tfevents.1764073039.LAPTOP-R455T5D2.5564.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_3/events.out.tfevents.1764073923.LAPTOP-R455T5D2.13968.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/rl_ppo.py" beforeDir="false" afterPath="$PROJECT_DIR$/rl_ppo.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/train_il_bc.py" beforeDir="false" afterPath="$PROJECT_DIR$/train_il_bc.py" afterDir="false" />
-    </list>
+    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="merge project that solve the conflict in 2 branch" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -163,7 +148,7 @@
       <workItem from="1765195418213" duration="617000" />
       <workItem from="1765273489772" duration="14171000" />
       <workItem from="1765298660665" duration="6965000" />
-      <workItem from="1765328568444" duration="295000" />
+      <workItem from="1765328568444" duration="690000" />
     </task>
     <task id="LOCAL-00001" summary="Create an environment of smart home">
       <option name="closed" value="true" />
@@ -253,7 +238,23 @@
       <option name="project" value="LOCAL" />
       <updated>1764077256333</updated>
     </task>
-    <option name="localTasksCounter" value="12" />
+    <task id="LOCAL-00012" summary="merge project that solve the conflict in 2 branch">
+      <option name="closed" value="true" />
+      <created>1765328990552</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1765328990552</updated>
+    </task>
+    <task id="LOCAL-00013" summary="merge project that solve the conflict in 2 branch">
+      <option name="closed" value="true" />
+      <created>1765329102332</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1765329102332</updated>
+    </task>
+    <option name="localTasksCounter" value="14" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
