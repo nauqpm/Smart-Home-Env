@@ -40,9 +40,6 @@ def get_tiered_price(hour: int, tiers: List[Tuple[int, float]]) -> float:
 
 def compute_pv_power_with_weather(times, latitude, longitude, tz, surface_tilt, 
                                   surface_azimuth, module_parameters, weather_factor=1.0):
-    """
-    Compute PV power. Falls back to simple SIN curve if pvlib missing or error.
-    """
     if HAS_PVLIB:
         try:
             loc = Location(latitude, longitude, tz=tz)
@@ -303,13 +300,12 @@ class SmartHomeEnv(gym.Env):
         # 2. SI Devices
         offset_si = self.N_su
         for i in range(self.N_si):
-            act_idx = offset_si + i
-            if act_idx < len(action) and action[act_idx] == 1:
+            if action[offset_si + i] == 1:
                 if self.si_status[i] < self.si_devs[i]['E']:
                     p_dev_load += self.si_devs[i]['rate']
                     self.si_status[i] += self.si_devs[i]['rate'] * self.time_step_h
                 else:
-                    comfort_penalty += 0.5 # Sạc thừa
+                    comfort_penalty += 2.0
                     
         # 3. AC (Adjustable)
         offset_ad = self.N_su + self.N_si
@@ -319,19 +315,17 @@ class SmartHomeEnv(gym.Env):
                 act = action[act_idx]
                 if act == 1:
                     p_dev_load += self.ad_devs[i]['P_com']
-                
-                # Comfort Check
+
                 if n_home > 0:
-                    if temp_out > 28.0 and act == 0: comfort_penalty += 5.0
-                    if temp_out < 25.0 and act == 1: comfort_penalty += 1.0
+                    if temp_out > 28.0 and act == 0:
+                        comfort_penalty += 10.0
 
         total_load = must + p_dev_load
         
         # Battery Logic
         pv_gen = float(self.pv_profile[idx])
         surplus = pv_gen - total_load
-        
-        # [FIX]: Rule-based Battery Control (Automatic)
+
         if surplus >= 0:
             p_ch = min(surplus, float(self.battery.get('p_charge_max_kw', 3.0)))
             eta = float(self.battery.get('eta_ch', 0.95))
