@@ -1,0 +1,526 @@
+{
+  "timesteps": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+  ],
+  "weather": [
+    "sunny",
+    "rainy",
+    "stormy",
+    "stormy",
+    "stormy",
+    "cloudy",
+    "rainy",
+    "stormy",
+    "stormy",
+    "rainy",
+    "stormy",
+    "cloudy",
+    "cloudy",
+    "mild",
+    "stormy",
+    "sunny",
+    "sunny",
+    "rainy",
+    "stormy",
+    "cloudy",
+    "cloudy",
+    "rainy",
+    "rainy",
+    "sunny"
+  ],
+  "occupancy": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2
+  ],
+  "soc": [
+    0.1842105263157895,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1
+  ],
+  "pv": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.3074770255817947,
+    0.594,
+    0.8400428560496187,
+    1.0288381796959132,
+    1.1475198816314134,
+    1.188,
+    1.1475198816314134,
+    1.0288381796959132,
+    0.8400428560496187,
+    0.594,
+    0.30747702558179496,
+    1.4548803973870556e-16,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "load": [
+    3.3,
+    3.5,
+    0.5,
+    2.0,
+    2.0,
+    6.8,
+    5.3,
+    0.5,
+    1.7,
+    1.7,
+    3.2,
+    5.0,
+    3.2,
+    1.7,
+    3.2,
+    1.7,
+    3.2,
+    0.5,
+    2.4,
+    2.4,
+    2.4,
+    0.9,
+    0.9,
+    3.5
+  ],
+  "grid": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "rewards": [
+    -5.00003,
+    -1.00027,
+    -1.50005,
+    -1.5002,
+    -1.5002,
+    -0.50068,
+    -6.500795,
+    -11.000028878446162,
+    -1.5001659,
+    -1.0001289935715927,
+    -1.0003256742730455,
+    -1.5005778720177554,
+    -1.0005030000000001,
+    -1.0001381200295922,
+    -1.0005427904550759,
+    -1.0002149892859875,
+    -1.5006515,
+    -11.000048130743604,
+    -6.000432,
+    -6.000432,
+    -6.500432,
+    -11.500162,
+    -11.000162,
+    -1.0006300000000001
+  ],
+  "devices": [
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": false
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": false
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": false
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": false
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": false
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": false,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    },
+    {
+      "lights": true,
+      "fridge": true,
+      "tv": true,
+      "ac": true
+    }
+  ],
+  "device_power": [
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 0.0,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 0.0,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 0.0,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 0.0,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 0.0,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.3074770255817947
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 0.594
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 0.8400428560496187
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 1.0288381796959132
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 1.1475198816314134
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 1.188
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 1.1475198816314134
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 1.0288381796959132
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 0.8400428560496187
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.0,
+      "ac": 1.5,
+      "pv": 0.594
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.30747702558179496
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 1.4548803973870556e-16
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.0
+    },
+    {
+      "lights": 0.1,
+      "fridge": 0.2,
+      "tv": 0.15,
+      "ac": 1.5,
+      "pv": 0.0
+    }
+  ]
+}
