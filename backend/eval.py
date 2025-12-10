@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 # Load reward logs
 r_base = np.load("ppo_baseline_rewards.npy")
-r_hybrid_new = np.load("ppo_hybrid_new_rewards.npy")
+r_hybrid_new = np.load("ppo_hybrid_rewards.npy")
 
 # Smoothing (moving average)
 def smooth(x, k=50):

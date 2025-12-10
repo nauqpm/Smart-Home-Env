@@ -5,7 +5,18 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="76465db2-3eae-4a19-ba02-e2c159bf0312" name="Changes" comment="push format">
+      <change beforePath="$PROJECT_DIR$/.idea/SmartHomeEnv.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/SmartHomeEnv.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/bc_policy.pt" beforeDir="false" afterPath="$PROJECT_DIR$/backend/bc_policy.pt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/eval.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/ppo_baseline_rewards.npy" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/ppo_hybrid_new_rewards.npy" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/ppo_hybrid_rewards.npy" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/ppo_hybrid_rewards_new.npy" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/backend/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/rl_ppo.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/rl_ppo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/rl_ppo_hybrid_new.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/rl_ppo_hybrid_new.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -40,9 +51,15 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "Python.eval.executor": "Run",
+    "Python.lbwo_solver.executor": "Run",
+    "Python.milp_expert.executor": "Run",
+    "Python.rl_ppo.executor": "Run",
+    "Python.rl_ppo_hybrid_new.executor": "Run",
+    "Python.train_il_bc.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "Merging Tam",
+    "git-widget-placeholder": "Tam",
     "node.js.detected.package.eslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
@@ -177,6 +194,10 @@
       <workItem from="1765360019382" duration="301000" />
       <workItem from="1765360345008" duration="841000" />
       <workItem from="1765361200417" duration="120000" />
+      <workItem from="1765361329853" duration="81000" />
+      <workItem from="1765361426866" duration="1639000" />
+      <workItem from="1765363101568" duration="51000" />
+      <workItem from="1765369312387" duration="953000" />
     </task>
     <task id="LOCAL-00001" summary="push format">
       <option name="closed" value="true" />
@@ -202,14 +223,41 @@
       <option name="project" value="LOCAL" />
       <updated>1765360380300</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="push format">
+      <option name="closed" value="true" />
+      <created>1765361350728</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1765361350728</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="push format" />
     <option name="LAST_COMMIT_MESSAGE" value="push format" />
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/eval_py$milp_expert.coverage" NAME="milp_expert Coverage Results" MODIFIED="1765369425103" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/backend" />
+    <SUITE FILE_PATH="coverage/eval_py$eval.coverage" NAME="eval Coverage Results" MODIFIED="1765370257597" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/backend" />
+    <SUITE FILE_PATH="coverage/eval_py$train_il_bc.coverage" NAME="train_il_bc Coverage Results" MODIFIED="1765369435859" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/backend" />
+    <SUITE FILE_PATH="coverage/eval_py$rl_ppo.coverage" NAME="rl_ppo Coverage Results" MODIFIED="1765369537990" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/backend" />
+    <SUITE FILE_PATH="coverage/eval_py$lbwo_solver.coverage" NAME="lbwo_solver Coverage Results" MODIFIED="1765369429060" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/backend" />
+    <SUITE FILE_PATH="coverage/eval_py$rl_ppo_hybrid_new.coverage" NAME="rl_ppo_hybrid_new Coverage Results" MODIFIED="1765369951176" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/backend" />
   </component>
 </project>
