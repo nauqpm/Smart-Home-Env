@@ -121,7 +121,7 @@ def make_env():
 # ===============================
 def main():
     T = 24
-    episodes_to_train = 50000
+    episodes_to_train = 10000
     total_timesteps = T * episodes_to_train
 
     print(f"\nTraining PPO for {episodes_to_train} episodes ({total_timesteps} timesteps)...")
@@ -144,6 +144,7 @@ def main():
     )
 
     model.save("ppo_smart_home")
+    np.save("ppo_baseline_rewards.npy", reward_logger.episode_rewards)
 
     # plot
     if len(reward_logger.episode_rewards) > 0:
@@ -161,3 +162,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
