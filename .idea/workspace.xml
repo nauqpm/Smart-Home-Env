@@ -4,33 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="76465db2-3eae-4a19-ba02-e2c159bf0312" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.name" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.name" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/backend/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/bc_policy.pt" beforeDir="false" afterPath="$PROJECT_DIR$/backend/bc_policy.pt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/output/example_expert_schedule.json" beforeDir="false" afterPath="$PROJECT_DIR$/backend/output/example_expert_schedule.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/simulation_data.json" beforeDir="false" afterPath="$PROJECT_DIR$/backend/simulation_data.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bc_policy.pt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/eval.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/output/example_expert_schedule.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_baseline_rewards.npy" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_hybrid_new_rewards.npy" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_hybrid_rewards.npy" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_hybrid_rewards_new.npy" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_hybrid_tb/PPO_1/events.out.tfevents.1765287283.LAPTOP-R455T5D2.8608.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_hybrid_tb/PPO_2/events.out.tfevents.1765304101.LAPTOP-R455T5D2.8172.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_1/events.out.tfevents.1765286735.LAPTOP-R455T5D2.11844.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_2/events.out.tfevents.1765300626.LAPTOP-R455T5D2.12416.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_3/events.out.tfevents.1765302856.LAPTOP-R455T5D2.20256.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_4/events.out.tfevents.1765304923.LAPTOP-R455T5D2.7024.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_5/events.out.tfevents.1765305198.LAPTOP-R455T5D2.17304.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_6/events.out.tfevents.1765340980.LAPTOP-R455T5D2.2408.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ppo_tb/PPO_7/events.out.tfevents.1765341422.LAPTOP-R455T5D2.2064.0" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/rl_ppo_hybrid_new.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/simulation_data.json" beforeDir="false" />
-    </list>
+    <list default="true" id="76465db2-3eae-4a19-ba02-e2c159bf0312" name="Changes" comment="push format" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -39,21 +13,21 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "taminhnd"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;taminhnd&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/nauqpm/Smart-Home-Env.git",
-    "accountId": "b41206c0-4a87-47a4-bf48-410fdff11854"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/nauqpm/Smart-Home-Env.git&quot;,
+    &quot;accountId&quot;: &quot;b41206c0-4a87-47a4-bf48-410fdff11854&quot;
   }
-}]]></component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 6
-}]]></component>
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 6
+}</component>
   <component name="ProjectId" id="36eGs7zMonZl18jppiUWMlgjL4k" />
   <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="2" id="Add" />
@@ -67,6 +41,8 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "git-widget-placeholder": "Tam",
+    "node.js.detected.package.eslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
     "vue.rearranger.settings.migration": "true"
@@ -196,10 +172,24 @@
       <option name="presentableId" value="Default" />
       <updated>1765359828732</updated>
       <workItem from="1765359830281" duration="169000" />
+      <workItem from="1765360019382" duration="301000" />
     </task>
+    <task id="LOCAL-00001" summary="push format">
+      <option name="closed" value="true" />
+      <created>1765360228374</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1765360228374</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="push format" />
+    <option name="LAST_COMMIT_MESSAGE" value="push format" />
   </component>
 </project>
