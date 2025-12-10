@@ -5,7 +5,23 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="merge project that solve the conflict in 2 branch">
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM_[Changes]/ppo_hybrid_smart_home.zip" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM_[Changes]/ppo_smart_home.zip" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM_[Changes]/shelved.patch" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM_[Changes]1/ppo_hybrid_smart_home.zip" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM_[Changes]1/ppo_smart_home.zip" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM_[Changes]1/shelved.patch" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM__Changes_.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_13_PM__Changes_1.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_14_PM_[Changes]/shelved.patch" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_12_10_2025_2_14_PM__Changes_.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/ppo_hybrid_rewards.npy" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/ppo_hybrid_rewards_new.npy" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/ppo_tb/PPO_6/events.out.tfevents.1765340980.LAPTOP-R455T5D2.2408.0" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/ppo_tb/PPO_7/events.out.tfevents.1765341422.LAPTOP-R455T5D2.2064.0" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ppo_hybrid_smart_home.zip" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ppo_smart_home.zip" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -268,7 +284,19 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State />
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="Tam" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
           </value>
         </entry>
       </map>
