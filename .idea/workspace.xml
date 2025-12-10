@@ -4,7 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="merge project that solve the conflict in 2 branch" />
+    <list default="true" id="a71ed218-38c7-446d-99fb-19a0d0bdf6c5" name="Changes" comment="merge project that solve the conflict in 2 branch">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -90,6 +92,7 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="JavaScript Debug.visualizer.html" />
         <item itemvalue="JavaScript Debug.visualizer.html" />
         <item itemvalue="JavaScript Debug.visualizer.html" />
         <item itemvalue="JavaScript Debug.visualizer.html" />
