@@ -1,0 +1,37 @@
+<changelist name="Uncommitted_changes_before_Merge_at_12_12_2025_11_28_AM_[Changes]" date="1765513700463" recycled="true" deleted="true">
+  <option name="PATH" value="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Merge_at_12_12_2025_11_28_AM_[Changes]/shelved.patch" />
+  <option name="DESCRIPTION" value="Uncommitted changes before Merge at 12/12/2025 11:28 AM [Changes]" />
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_smart_home.zip" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_hybrid_tb/PPO_1/events.out.tfevents.1765287283.LAPTOP-R455T5D2.8608.0" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_tb/PPO_2/events.out.tfevents.1765300626.LAPTOP-R455T5D2.12416.0" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_hybrid_smart_home.zip" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_hybrid_tb/PPO_2/events.out.tfevents.1765304101.LAPTOP-R455T5D2.8172.0" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_baseline_rewards.npy" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_hybrid_new_rewards.npy" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_tb/PPO_4/events.out.tfevents.1765304923.LAPTOP-R455T5D2.7024.0" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_tb/PPO_3/events.out.tfevents.1765302856.LAPTOP-R455T5D2.20256.0" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_tb/PPO_5/events.out.tfevents.1765305198.LAPTOP-R455T5D2.17304.0" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="ppo_tb/PPO_1/events.out.tfevents.1765286735.LAPTOP-R455T5D2.11844.0" />
+  </binary>
+</changelist>
