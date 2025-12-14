@@ -30,13 +30,40 @@ logger.setLevel(logging.INFO)
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
+def calculate_vietnam_tiered_bill(kwh: float) -> float:
+    """
+    Tier 1 (0 - 50 kWh): 1,984 VND
+    Tier 2 (51 - 100 kWh): 2,050 VND
+    Tier 3 (101 - 200 kWh): 2,380 VND
+    Tier 4 (201 - 300 kWh): 2,998 VND
+    Tier 5 (301 - 400 kWh): 3,350 VND
+    Tier 6 (401+ kWh): 3,460 VND
+    """
+    tiers = [
+        (50, 1984),
+        (50, 2050), # Next 50 (Total 100)
+        (100, 2380), # Next 100 (Total 200)
+        (100, 2998), # Next 100 (Total 300)
+        (100, 3350), # Next 100 (Total 400)
+        (float('inf'), 3460)
+    ]
+    
+    bill = 0.0
+    remaining = kwh
+    
+    for limit, price in tiers:
+        if remaining <= 0:
+            break
+        amount = min(remaining, limit)
+        bill += amount * price
+        remaining -= amount
+        
+    return bill
+
 def get_tiered_price(hour: int, tiers: List[Tuple[int, float]]) -> float:
-    for i in range(len(tiers)):
-        start, price = tiers[i]
-        next_start = tiers[i+1][0] if i+1 < len(tiers) else 24
-        if start <= hour < next_start:
-            return price
-    return tiers[-1][1]
+    # Deprecated for billing, but kept if needed for momentary pricing (optional)
+    # Returning average for backwards compatibility or safe fallback
+    return 2500.0 
 
 def compute_pv_power_with_weather(times, latitude, longitude, tz, surface_tilt, 
                                   surface_azimuth, module_parameters, weather_factor=1.0):
@@ -132,6 +159,14 @@ class AdvancedHumanBehaviorGenerator:
 # --- MAIN ENV CLASS ---
 class SmartHomeEnv(gym.Env):
     metadata = {'render.modes': ['human']}
+    
+    def get_frontend_state(self):
+        return {
+            'total_bill': int(self.total_cost),
+            'import_kwh': round(self.cumulative_import_kwh, 2),
+            'export_kwh': round(self.cumulative_export_kwh, 2),
+            'soc': round(self.soc * 100, 1)
+        }
 
     def __init__(self, price_profile, pv_profile, config):
         super().__init__()
@@ -231,6 +266,8 @@ class SmartHomeEnv(gym.Env):
         self.soc = float(self.battery.get('soc_init', 0.5))
         self.su_status = np.zeros(self.N_su)
         self.si_status = np.zeros(self.N_si)
+        self.cumulative_import_kwh = 0.0
+        self.cumulative_export_kwh = 0.0
         self.total_cost = 0.0
 
     def _get_obs(self):
@@ -347,9 +384,22 @@ class SmartHomeEnv(gym.Env):
             grid = deficit - p_dis
 
         current_weather = self.weather_series[idx] if idx < len(self.weather_series) else "unknown"
-        price = self.price_profile[idx]
-        cost = max(0.0, grid) * price
-        self.total_cost += cost
+        current_weather = self.weather_series[idx] if idx < len(self.weather_series) else "unknown"
+        
+        # --- BILLING LOGIC (TIERED) ---
+        # grid > 0: Import | grid < 0: Export
+        grid_kwh = grid * self.time_step_h
+        
+        if grid_kwh > 0:
+            self.cumulative_import_kwh += grid_kwh
+        else:
+            self.cumulative_export_kwh += abs(grid_kwh)
+            
+        import_bill = calculate_vietnam_tiered_bill(self.cumulative_import_kwh)
+        export_revenue = self.cumulative_export_kwh * 2000.0 # Feed-in Tariff
+        
+        self.total_cost = import_bill - export_revenue
+        cost = 0 # Step cost is implicit in total
         
         reward = -cost / 1000.0 - comfort_penalty
         if self.soc <= self.battery['soc_min'] + 0.01: reward -= 0.5
@@ -365,9 +415,11 @@ class SmartHomeEnv(gym.Env):
                 if self.si_status[i] < self.si_devs[i]['E'] * 0.9: reward -= 20.0
                 
         info = {
-            'cost': cost, 'soc': self.soc, 'temp': temp_out, 
+            'cost': cost, 'total_cost': int(self.total_cost), 'soc': self.soc, 'temp': temp_out, 
             'n_home': n_home, 'pv': pv_gen, 'load': total_load,
-            'weather': current_weather
+            'weather': current_weather,
+            'cumulative_import': self.cumulative_import_kwh,
+            'cumulative_export': self.cumulative_export_kwh
         }
         
         return self._get_obs() if not done else np.zeros(10, dtype=np.float32), float(reward), done, False, info

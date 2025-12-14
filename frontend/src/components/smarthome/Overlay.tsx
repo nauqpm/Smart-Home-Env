@@ -3,15 +3,32 @@ import { Html } from '@react-three/drei';
 import { useStore } from '../../stores/useStore';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
+// Helper for VND Currency
+const formatVND = (value: number) =>
+    new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value);
+
 export default function Overlay() {
-    const { devices, metricsHistory, toggleDevice, toggleNight, isNight, aiMode, toggleAIMode, batterySOC, gridImport, gridPrice, decisionLog } = useStore();
+    const { devices, metricsHistory, toggleDevice, toggleNight, isNight, aiMode, toggleAIMode, batterySOC, gridImport, gridPrice, decisionLog, totalBill, weather, n_home } = useStore();
+
+    // totalBill might be undefined if store update hasn't propagated, default to 0
+    const currentBill = totalBill || 0;
 
     const [activeTab, setActiveTab] = useState<'devices' | 'grid'>('grid');
 
     // Derived metrics
-    const lastMetric = metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : { power: 0, temperature: 28 };
+    const lastMetric = metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : { time: '00:00', power: 0, temperature: 28 };
     const totalPower = Math.round(lastMetric.power);
-    const temperature = lastMetric.temperature.toFixed(1);
+
+    // Use simulated temp if available, else store default
+    const displayTemp = lastMetric.temperature.toFixed(1);
+
+    // Weather Icons
+    const weatherIcon = {
+        sunny: '☀️',
+        cloudy: '☁️',
+        rainy: '🌧️',
+        stormy: '⛈️'
+    }[weather] || '☀️';
 
     return (
         <Html fullscreen style={{ pointerEvents: 'none' }}>
@@ -35,8 +52,17 @@ export default function Overlay() {
             }}>
                 {/* Header & Global Controls */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: '0.5px', color: '#00e5ff', textShadow: '0 0 10px rgba(0,229,255,0.6)' }}>IOT HUB</h2>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div>
+                        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: '0.5px', color: '#00e5ff', textShadow: '0 0 10px rgba(0,229,255,0.6)' }}>
+                            IOT HUB <span style={{ fontSize: 12, fontWeight: 400, color: '#aaa', marginLeft: 8 }}>{lastMetric.time}</span>
+                        </h2>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                            <span style={{ fontSize: 16 }}>{weatherIcon}</span>
+                            <span style={{ fontSize: 11, color: '#aaa' }}>{weather.toUpperCase()} • {displayTemp}°C</span>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
                         <div
                             onClick={toggleNight}
                             style={{
@@ -47,6 +73,19 @@ export default function Overlay() {
                         >
                             <span style={{ fontSize: 10, fontWeight: 600 }}>{isNight ? 'NIGHT' : 'DAY'}</span>
                             <div style={{ width: 8, height: 8, borderRadius: '50%', background: isNight ? '#4aa3df' : '#ffcc00', boxShadow: isNight ? '0 0 8px #4aa3df' : '0 0 8px #ffcc00' }} />
+                        </div>
+
+                        {/* Occupancy Badge */}
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            background: n_home > 0 ? 'rgba(76, 175, 80, 0.2)' : 'rgba(120, 144, 156, 0.2)',
+                            padding: '4px 10px', borderRadius: 20,
+                            border: n_home > 0 ? '1px solid rgba(76, 175, 80, 0.4)' : '1px solid rgba(120, 144, 156, 0.4)'
+                        }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: n_home > 0 ? '#4caf50' : '#b0bec5', boxShadow: n_home > 0 ? '0 0 6px #4caf50' : 'none' }} />
+                            <span style={{ fontSize: 9, fontWeight: 600, color: n_home > 0 ? '#81c784' : '#b0bec5' }}>
+                                {n_home > 0 ? `OCCUPIED (${n_home})` : 'EMPTY'}
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -101,9 +140,9 @@ export default function Overlay() {
                         {/* KPIS */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                             <div style={{ background: 'rgba(255,255,255,0.05)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                                <div style={{ fontSize: 9, color: '#aaa' }}>Grid Price</div>
-                                <div style={{ fontSize: 16, fontWeight: 700, color: '#ff5252' }}>${gridPrice}</div>
-                                <div style={{ fontSize: 8, color: '#666' }}>/ kWh</div>
+                                <div style={{ fontSize: 9, color: '#aaa' }}>Current Bill</div>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: '#ffb74d' }}>{formatVND(currentBill)}</div>
+                                <div style={{ fontSize: 8, color: '#666' }}>Month Accum.</div>
                             </div>
                             <div style={{ background: 'rgba(255,255,255,0.05)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
                                 <div style={{ fontSize: 9, color: '#aaa' }}>Importing</div>
@@ -132,8 +171,8 @@ export default function Overlay() {
                                             <stop offset="95%" stopColor="#00e5ff" stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
-                                    <XAxis dataKey="time" hide />
-                                    <YAxis hide domain={['auto', 'auto']} />
+                                    <XAxis dataKey="time" minTickGap={20} tick={{ fontSize: 10, fill: '#666' }} />
+                                    <YAxis hide domain={['auto', 'auto']} tickFormatter={(val) => val > 1000 ? `${(val / 1000).toFixed(0)}k` : val} style={{ fontSize: 10, fill: '#666' }} />
                                     <Tooltip contentStyle={{ background: '#222', border: 'none', fontSize: 11 }} />
                                     <Area type="monotone" dataKey="power" stroke="#00e5ff" fill="url(#gradLoad)" />
                                 </AreaChart>
@@ -166,7 +205,7 @@ export default function Overlay() {
                             <div style={{ background: 'rgba(0, 229, 255, 0.05)', padding: 12, borderRadius: 12, border: '1px solid rgba(0, 229, 255, 0.1)' }}>
                                 <div style={{ fontSize: 10, color: '#88ccff', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Temperature</div>
                                 <div style={{ fontSize: 24, fontWeight: 700, color: '#fff' }}>
-                                    {temperature} <span style={{ fontSize: 14, color: '#00e5ff', fontWeight: 400 }}>°C</span>
+                                    {displayTemp} <span style={{ fontSize: 14, color: '#00e5ff', fontWeight: 400 }}>°C</span>
                                 </div>
                             </div>
                         </div>

@@ -20,6 +20,16 @@ interface State {
     gridPrice: number; // $/kWh
     gridImport: number; // W. Positive = Buying, Negative = Selling
     decisionLog: string[];
+    totalBill: number; // Accumulating Bill in VND
+
+    // Environmental Context
+    weather: 'sunny' | 'cloudy' | 'rainy' | 'stormy';
+    n_home: number;
+
+    // Data Playback
+    simulationData: any[];
+    fetchData: () => Promise<void>;
+    simStep: number;
 
     // Actions
     toggleDevice: (id: string) => void;
@@ -50,9 +60,27 @@ export const useStore = create<State>((set) => ({
     // AI Defaults
     aiMode: false,
     batterySOC: 0.5,
-    gridPrice: 0.12,
+    gridPrice: 2540, // Avg VND
     gridImport: 0,
     decisionLog: ['System Initialized'],
+    totalBill: 0, // Accumulator
+    weather: 'sunny',
+    n_home: 2,
+    simulationData: [],
+    simStep: 0,
+
+    fetchData: async () => {
+        try {
+            const response = await fetch('/data/agent_comparison.json');
+            const json = await response.json();
+            if (json && json.series) {
+                set({ simulationData: json.series });
+                console.log("Sim Data Loaded:", json.series.length);
+            }
+        } catch (e) {
+            console.error("Failed to load sim data", e);
+        }
+    },
 
     toggleDevice: (id) =>
         set((state) => {
@@ -88,50 +116,92 @@ export const useStore = create<State>((set) => ({
                 totalLoad += device.currentPower;
             });
 
-            // 2. Mock AI Logic (if no backend connected yet)
+
+            // 2. Playback or Mock Logic
             let newSOC = state.batterySOC;
             let newGridImport = totalLoad;
             let newGridPrice = state.gridPrice;
             const newLogs = [...state.decisionLog];
+            let newTotalBill = state.totalBill || 0;
+            let newWeather = state.weather;
+            let newNHome = state.n_home;
 
-            // Simulate Grid Price fluctuations
-            if (Math.random() > 0.9) {
-                newGridPrice = 0.10 + Math.random() * 0.20; // 0.10 to 0.30
-                newLogs.unshift(`${new Date().toLocaleTimeString()} - Price Change: $${newGridPrice.toFixed(2)}`);
-            }
+            const nextStep = (state.simStep || 0) + 1;
+            const { simulationData, metricsHistory } = state;
 
-            // Simulate Battery Logic
-            // If Price > 0.25, Discharge Battery to reduce Grid Import
-            // If Price < 0.15, Charge Battery
-            const batteryMaxPower = 3000; // 3kW max
+            let timeStr = "";
 
-            if (newGridPrice > 0.25 && newSOC > 0.1) {
-                // High Price: Discharge
-                const dischargeAmount = Math.min(totalLoad, batteryMaxPower);
-                newGridImport = totalLoad - dischargeAmount;
-                newSOC -= 0.005; // Drain battery
-                if (Math.random() > 0.8) newLogs.unshift("High Price: Discharging Battery");
-            } else if (newGridPrice < 0.15 && newSOC < 0.95) {
-                // Low Price: Charge
-                newGridImport = totalLoad + 2000; // Load + Charging
-                newSOC += 0.005; // Charge battery
-                if (Math.random() > 0.8) newLogs.unshift("Low Price: Charging Battery");
+            if (simulationData && simulationData.length > 0) {
+                // --- PLAYBACK MODE ---
+                const idx = (nextStep) % simulationData.length;
+                const row = simulationData[idx];
+
+                // Map JSON fields to State
+                newWeather = row.weather || 'sunny';
+                newNHome = row.n_home !== undefined ? row.n_home : 2;
+                newSOC = row.ppo_soc;
+                newGridImport = row.ppo_grid;
+                totalLoad = row.load; // Overwrite random load with real sim load
+
+                // Cost (Total Bill from JSON)
+                newTotalBill = row.ppo_total_bill;
+
+                if (idx === 0) newLogs.unshift("Restarting Cycle");
+
+                // Format Time: Day X - HH:00
+                const d = row.day || Math.floor(idx / 24) + 1;
+                const h = row.hour !== undefined ? row.hour : idx % 24;
+                timeStr = `D${d} ${h.toString().padStart(2, '0')}:00`;
+
             } else {
-                // Idle
-                newGridImport = totalLoad;
+                // --- MOCK MODE (Fallback) ---
+                // Mock Environmental Changes
+                if (Math.random() > 0.98) {
+                    const weathers: ('sunny' | 'cloudy' | 'rainy' | 'stormy')[] = ['sunny', 'cloudy', 'rainy', 'stormy'];
+                    newWeather = weathers[Math.floor(Math.random() * weathers.length)];
+                    newLogs.unshift(`Weather changed to ${newWeather.toUpperCase()}`);
+                }
+                if (Math.random() > 0.98) {
+                    newNHome = Math.floor(Math.random() * 4);
+                }
+
+                // Simulate Grid Price (VND)
+                if (Math.random() > 0.9) {
+                    newGridPrice = 2500 + Math.random() * 500;
+                }
+
+                // Simulate Battery
+                const batteryMaxPower = 3000;
+                if (newGridPrice > 3000 && newSOC > 0.1) {
+                    const dischargeAmount = Math.min(totalLoad, batteryMaxPower);
+                    newGridImport = totalLoad - dischargeAmount;
+                    newSOC -= 0.005;
+                    if (Math.random() > 0.8) newLogs.unshift("High Rate: Discharging");
+                } else if (newGridPrice < 2100 && newSOC < 0.95) {
+                    newGridImport = totalLoad + 2000;
+                    newSOC += 0.005;
+                    if (Math.random() > 0.8) newLogs.unshift("Low Rate: Charging");
+                } else {
+                    newGridImport = totalLoad;
+                }
+
+                // Accumulate Bill Mock
+                const kwh = newGridImport / 1000.0;
+                if (kwh > 0) newTotalBill += kwh * 2500;
+                else newTotalBill += kwh * 2000;
+
+                const now = new Date();
+                timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
             }
 
             // keep log size small
             if (newLogs.length > 5) newLogs.pop();
 
             // 3. Add to history
-            const now = new Date();
-            const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-
             const newMetric = {
                 time: timeStr,
                 power: totalLoad,
-                temperature: 28 + Math.random(),
+                temperature: (simulationData && simulationData.length > 0) ? (simulationData[(nextStep) % simulationData.length].temp || 28) : (28 + Math.random()),
             };
 
             const newHistory = [...state.metricsHistory, newMetric];
@@ -144,8 +214,12 @@ export const useStore = create<State>((set) => ({
                 metricsHistory: newHistory,
                 batterySOC: Math.max(0, Math.min(1, newSOC)),
                 gridImport: Math.round(newGridImport),
-                gridPrice: parseFloat(newGridPrice.toFixed(2)),
-                decisionLog: newLogs
+                gridPrice: (simulationData && simulationData.length > 0) ? 2540 : Math.round(newGridPrice),
+                decisionLog: newLogs,
+                totalBill: newTotalBill,
+                weather: newWeather,
+                n_home: newNHome,
+                simStep: nextStep
             };
         }),
 }));
