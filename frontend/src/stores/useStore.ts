@@ -9,217 +9,190 @@ export interface Device {
     currentPower: number; // Watts
 }
 
+// Data structure returned by Backend API
+export interface SimStepData {
+    hour: number;
+    soc: number;
+    grid: number; // net import/export
+    load: number;
+    pv: number;
+    temp: number;
+    reward: number;
+    total_bill: number;
+    n_home: number;
+    weather: string;
+    devices: {
+        washer: boolean;
+        dishwasher: boolean;
+        charger: boolean;
+        ac_living: boolean;
+        ac_master: boolean;
+        tv: boolean;
+        fridge: boolean;
+        lights: boolean;
+    };
+}
+
+interface SimDataPacket {
+    ppo: SimStepData[];
+    hybrid: SimStepData[];
+}
+
 interface State {
     devices: Record<string, Device>;
     metricsHistory: { time: string; power: number; temperature: number }[];
     isNight: boolean;
 
     // AI / Backend State
-    aiMode: boolean;
+    aiMode: boolean; // Not used as much in Replay, but kept for UI toggle
     batterySOC: number; // 0.0 - 1.0
-    gridPrice: number; // $/kWh
-    gridImport: number; // W. Positive = Buying, Negative = Selling
+    gridPrice: number; // $/kWh or VND
+    gridImport: number; // W
     decisionLog: string[];
     totalBill: number; // Accumulating Bill in VND
 
     // Environmental Context
-    weather: 'sunny' | 'cloudy' | 'rainy' | 'stormy';
+    weather: string;
     n_home: number;
 
-    // Data Playback
-    simulationData: any[];
-    fetchData: () => Promise<void>;
-    simStep: number;
+    // Simulation & Replay
+    simData: SimDataPacket | null;
+    currentModelView: 'ppo' | 'hybrid';
+    simStep: number; // 0..23
+    isLoading: boolean;
 
     // Actions
+    fetchSimulation: (config: any) => Promise<void>;
+    setSimStep: (step: number) => void;
+    setModelView: (model: 'ppo' | 'hybrid') => void;
     toggleDevice: (id: string) => void;
     toggleNight: () => void;
-    toggleAIMode: () => void;
-    updateAIState: (data: Partial<State>) => void;
-    tick: () => void;
+    tick: () => void; // Used for auto-play loop if we keep it
 }
 
 const INITIAL_DEVICES: Record<string, Device> = {
     tv: { id: 'tv', name: 'Smart TV', type: 'tv', isOn: false, basePower: 150, currentPower: 0 },
     fridge: { id: 'fridge', name: 'Smart Fridge', type: 'fridge', isOn: true, basePower: 200, currentPower: 200 },
     washer: { id: 'washer', name: 'Washer', type: 'washer', isOn: false, basePower: 500, currentPower: 0 },
-    ac_living: { id: 'ac_living', name: 'AC Living Room', type: 'ac', isOn: true, basePower: 1200, currentPower: 1200 },
-    ac_master: { id: 'ac_master', name: 'AC Master Bed', type: 'ac', isOn: false, basePower: 1000, currentPower: 0 },
+    ac_living: { id: 'ac_living', name: 'AC Living', type: 'ac', isOn: false, basePower: 1500, currentPower: 0 },
+    ac_master: { id: 'ac_master', name: 'AC Master', type: 'ac', isOn: false, basePower: 1000, currentPower: 0 },
     fan: { id: 'fan', name: 'Ceiling Fan', type: 'fan', isOn: true, basePower: 75, currentPower: 75 },
     charger: { id: 'charger', name: 'EV Charger', type: 'charger', isOn: false, basePower: 7000, currentPower: 0 },
-    laptop: { id: 'laptop', name: 'Guest Laptop', type: 'laptop', isOn: true, basePower: 65, currentPower: 65 },
-    lamp: { id: 'lamp', name: 'Floor Lamp', type: 'light', isOn: false, basePower: 15, currentPower: 0 },
-    solar: { id: 'solar', name: 'Solar Inverter', type: 'charger', isOn: true, basePower: 0, currentPower: 0 }, // Monitor only
+    laptop: { id: 'laptop', name: 'Laptop', type: 'laptop', isOn: false, basePower: 65, currentPower: 0 },
+    lamp: { id: 'lamp', name: 'Smart Light', type: 'light', isOn: false, basePower: 15, currentPower: 0 },
 };
 
-export const useStore = create<State>((set) => ({
+export const useStore = create<State>((set, get) => ({
     devices: INITIAL_DEVICES,
     metricsHistory: [],
     isNight: false,
 
-    // AI Defaults
-    aiMode: false,
+    aiMode: true,
     batterySOC: 0.5,
-    gridPrice: 2540, // Avg VND
+    gridPrice: 2540,
     gridImport: 0,
-    decisionLog: ['System Initialized'],
-    totalBill: 0, // Accumulator
+    decisionLog: ['System Ready'],
+    totalBill: 0,
     weather: 'sunny',
     n_home: 2,
-    simulationData: [],
-    simStep: 0,
 
-    fetchData: async () => {
+    simData: null,
+    currentModelView: 'hybrid', // Default to showing the better model
+    simStep: 0,
+    isLoading: false,
+
+    fetchSimulation: async (config) => {
+        set({ isLoading: true });
         try {
-            const response = await fetch('/data/agent_comparison.json');
-            const json = await response.json();
-            if (json && json.series) {
-                set({ simulationData: json.series });
-                console.log("Sim Data Loaded:", json.series.length);
+            const response = await fetch('http://localhost:8000/simulate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            const data = await response.json();
+            if (data && data.ppo && data.hybrid) {
+                set({
+                    simData: data,
+                    simStep: 0,
+                    isLoading: false,
+                    decisionLog: [`Simulation Completed. Loaded ${data.ppo.length} steps.`]
+                });
+                // Trigger initial update
+                get().setSimStep(0);
             }
         } catch (e) {
-            console.error("Failed to load sim data", e);
+            console.error("Simulation API Error", e);
+            set({ isLoading: false, decisionLog: ["Simulation Failed. Check Backend."] });
         }
     },
 
-    toggleDevice: (id) =>
-        set((state) => {
-            if (state.aiMode) return state; // Disable manual control in AI Mode (optional choice)
-            const device = state.devices[id];
-            if (!device) return state;
-            return {
-                devices: {
-                    ...state.devices,
-                    [id]: { ...device, isOn: !device.isOn },
-                },
-            };
-        }),
+    setSimStep: (step) => {
+        const { simData, currentModelView } = get();
+        if (!simData) return;
 
-    toggleNight: () => set((state) => ({ isNight: !state.isNight })),
-    toggleAIMode: () => set((state) => ({ aiMode: !state.aiMode })),
-    updateAIState: (data) => set((state) => ({ ...state, ...data })),
+        // Clamp step
+        const safeStep = Math.max(0, Math.min(step, simData[currentModelView].length - 1));
+        const dataPoint = simData[currentModelView][safeStep];
 
-    tick: () =>
+        // Update Environment State
         set((state) => {
-            // 1. Update power for all active devices with noise
             const newDevices = { ...state.devices };
-            let totalLoad = 0;
 
-            Object.keys(newDevices).forEach((key) => {
-                const device = newDevices[key];
-                if (device.isOn) {
-                    const noise = Math.random() * 10 - 5;
-                    device.currentPower = Math.max(0, Math.floor(device.basePower + noise));
-                } else {
-                    device.currentPower = 0;
-                }
-                totalLoad += device.currentPower;
-            });
+            // Map API device states to local devices
+            if (dataPoint.devices) {
+                newDevices.washer.isOn = dataPoint.devices.washer;
+                newDevices.washer.currentPower = dataPoint.devices.washer ? newDevices.washer.basePower : 0;
 
+                newDevices.ac_living.isOn = dataPoint.devices.ac_living;
+                newDevices.ac_living.currentPower = dataPoint.devices.ac_living ? newDevices.ac_living.basePower : 0;
 
-            // 2. Playback or Mock Logic
-            let newSOC = state.batterySOC;
-            let newGridImport = totalLoad;
-            let newGridPrice = state.gridPrice;
-            const newLogs = [...state.decisionLog];
-            let newTotalBill = state.totalBill || 0;
-            let newWeather = state.weather;
-            let newNHome = state.n_home;
+                newDevices.ac_master.isOn = dataPoint.devices.ac_master;
+                newDevices.ac_master.currentPower = dataPoint.devices.ac_master ? newDevices.ac_master.basePower : 0;
 
-            const nextStep = (state.simStep || 0) + 1;
-            const { simulationData, metricsHistory } = state;
+                newDevices.charger.isOn = dataPoint.devices.charger;
+                newDevices.charger.currentPower = dataPoint.devices.charger ? newDevices.charger.basePower : 0;
 
-            let timeStr = "";
+                newDevices.tv.isOn = dataPoint.devices.tv;
+                newDevices.tv.currentPower = dataPoint.devices.tv ? newDevices.tv.basePower : 0;
 
-            if (simulationData && simulationData.length > 0) {
-                // --- PLAYBACK MODE ---
-                const idx = (nextStep) % simulationData.length;
-                const row = simulationData[idx];
+                newDevices.lamp.isOn = dataPoint.devices.lights;
+                newDevices.lamp.currentPower = dataPoint.devices.lights ? newDevices.lamp.basePower : 0;
 
-                // Map JSON fields to State
-                newWeather = row.weather || 'sunny';
-                newNHome = row.n_home !== undefined ? row.n_home : 2;
-                newSOC = row.ppo_soc;
-                newGridImport = row.ppo_grid;
-                totalLoad = row.load; // Overwrite random load with real sim load
-
-                // Cost (Total Bill from JSON)
-                newTotalBill = row.ppo_total_bill;
-
-                if (idx === 0) newLogs.unshift("Restarting Cycle");
-
-                // Format Time: Day X - HH:00
-                const d = row.day || Math.floor(idx / 24) + 1;
-                const h = row.hour !== undefined ? row.hour : idx % 24;
-                timeStr = `D${d} ${h.toString().padStart(2, '0')}:00`;
-
-            } else {
-                // --- MOCK MODE (Fallback) ---
-                // Mock Environmental Changes
-                if (Math.random() > 0.98) {
-                    const weathers: ('sunny' | 'cloudy' | 'rainy' | 'stormy')[] = ['sunny', 'cloudy', 'rainy', 'stormy'];
-                    newWeather = weathers[Math.floor(Math.random() * weathers.length)];
-                    newLogs.unshift(`Weather changed to ${newWeather.toUpperCase()}`);
-                }
-                if (Math.random() > 0.98) {
-                    newNHome = Math.floor(Math.random() * 4);
-                }
-
-                // Simulate Grid Price (VND)
-                if (Math.random() > 0.9) {
-                    newGridPrice = 2500 + Math.random() * 500;
-                }
-
-                // Simulate Battery
-                const batteryMaxPower = 3000;
-                if (newGridPrice > 3000 && newSOC > 0.1) {
-                    const dischargeAmount = Math.min(totalLoad, batteryMaxPower);
-                    newGridImport = totalLoad - dischargeAmount;
-                    newSOC -= 0.005;
-                    if (Math.random() > 0.8) newLogs.unshift("High Rate: Discharging");
-                } else if (newGridPrice < 2100 && newSOC < 0.95) {
-                    newGridImport = totalLoad + 2000;
-                    newSOC += 0.005;
-                    if (Math.random() > 0.8) newLogs.unshift("Low Rate: Charging");
-                } else {
-                    newGridImport = totalLoad;
-                }
-
-                // Accumulate Bill Mock
-                const kwh = newGridImport / 1000.0;
-                if (kwh > 0) newTotalBill += kwh * 2500;
-                else newTotalBill += kwh * 2000;
-
-                const now = new Date();
-                timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-            }
-
-            // keep log size small
-            if (newLogs.length > 5) newLogs.pop();
-
-            // 3. Add to history
-            const newMetric = {
-                time: timeStr,
-                power: totalLoad,
-                temperature: (simulationData && simulationData.length > 0) ? (simulationData[(nextStep) % simulationData.length].temp || 28) : (28 + Math.random()),
-            };
-
-            const newHistory = [...state.metricsHistory, newMetric];
-            if (newHistory.length > 20) {
-                newHistory.shift();
+                // Keep fridge always on/visual consistency
+                newDevices.fridge.isOn = true;
+                newDevices.fridge.currentPower = 200;
             }
 
             return {
                 devices: newDevices,
-                metricsHistory: newHistory,
-                batterySOC: Math.max(0, Math.min(1, newSOC)),
-                gridImport: Math.round(newGridImport),
-                gridPrice: (simulationData && simulationData.length > 0) ? 2540 : Math.round(newGridPrice),
-                decisionLog: newLogs,
-                totalBill: newTotalBill,
-                weather: newWeather,
-                n_home: newNHome,
-                simStep: nextStep
+                simStep: safeStep,
+                batterySOC: dataPoint.soc,
+                gridImport: Math.round(dataPoint.load - dataPoint.pv), // Simplified visual
+                totalBill: dataPoint.total_bill,
+                n_home: dataPoint.n_home,
+                weather: dataPoint.weather,
+                isNight: safeStep < 6 || safeStep > 18, // Auto day/night based on hour
+            };
+        });
+    },
+
+    setModelView: (model) => {
+        set({ currentModelView: model });
+        get().setSimStep(get().simStep); // Refresh view with new model data
+    },
+
+    toggleDevice: (id) =>
+        set((state) => {
+            if (state.simData) return state; // Locked in Sim Mode
+            const device = state.devices[id];
+            return {
+                devices: { ...state.devices, [id]: { ...device, isOn: !device.isOn } }
             };
         }),
+
+    toggleNight: () => set((state) => ({ isNight: !state.isNight })),
+
+    tick: () => {
+        // Optional: Auto-play logic could go here if we want a Play button later
+    }
 }));

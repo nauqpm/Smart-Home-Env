@@ -2,89 +2,175 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { makeTileMat, makeWallMat, makeWoodFloorMat } from './materials';
 
-type WallSeg = {
-  w: number; h: number; d: number;
-  x: number; y: number; z: number;
-  ry?: number;
+// ==========================================
+// CONSTANTS
+// ==========================================
+const WALL_H = 2.5;   // Wall height (meters)
+const WALL_T = 0.15;  // Wall thickness (meters)
+
+// Footprint: 8m (x: -4 to 4) × 7.5m (z: -3.75 to 3.75)
+// Origin at center [0, 0, 0]
+
+// ==========================================
+// TYPE DEFINITIONS
+// ==========================================
+type WallDef = {
+    id: string;
+    w: number; h: number; d: number;
+    x: number; y: number; z: number;
+    ry?: number;
+    isWindow?: boolean;
 };
 
-type FloorSlab = {
-  size: [number, number, number]; // Bắt buộc là mảng 3 số
-  pos: [number, number, number];  // Bắt buộc là mảng 3 số
-  mat: THREE.Material;
+type FloorDef = {
+    id: string;
+    size: [number, number, number];
+    pos: [number, number, number];
+    matType: 'wood' | 'tile';
 };
 
-const WALL_H = 3;
-const WALL_T = 0.2;
+// ==========================================
+// WALLS ARRAY - Seamless corners (overlap by WALL_T/2)
+// ==========================================
+const WALLS: WallDef[] = [
+    // ========================================
+    // PERIMETER WALLS
+    // ========================================
+    // North wall (z = 3.75)
+    { id: 'perimeter-north', w: 8 + WALL_T, h: WALL_H, d: WALL_T, x: 0, y: WALL_H / 2, z: 3.75 + WALL_T / 2 },
+    // South wall (z = -3.75)
+    { id: 'perimeter-south', w: 8 + WALL_T, h: WALL_H, d: WALL_T, x: 0, y: WALL_H / 2, z: -3.75 - WALL_T / 2 },
+    // West wall (x = -4)
+    { id: 'perimeter-west', w: WALL_T, h: WALL_H, d: 7.5 + WALL_T, x: -4 - WALL_T / 2, y: WALL_H / 2, z: 0 },
+    // East wall (x = 4)
+    { id: 'perimeter-east', w: WALL_T, h: WALL_H, d: 7.5 + WALL_T, x: 4 + WALL_T / 2, y: WALL_H / 2, z: 0 },
 
-function Wall({ seg, material }: { seg: WallSeg; material: THREE.Material }) {
-  return (
-    <mesh position={[seg.x, seg.y, seg.z]} rotation={[0, seg.ry || 0, 0]} material={material} castShadow receiveShadow>
-      <boxGeometry args={[seg.w, seg.h, seg.d]} />
-    </mesh>
-  );
+    // ========================================
+    // ZONE A/B DIVIDER (x = 0, Private/Common separation)
+    // ========================================
+    // Living/Dining divider from Master Bedroom (z: 1 to 3.75)
+    // NO door - full wall to living room
+    { id: 'divider-ab-top', w: WALL_T, h: WALL_H, d: 2.75, x: 0, y: WALL_H / 2, z: 2.375 },
+
+    // Divider Small Bedroom / Kitchen-Dining (z: -3.75 to -0.5)
+    // NO door - full wall separating bedroom from kitchen
+    { id: 'divider-ab-bot', w: WALL_T, h: WALL_H, d: 3.25, x: 0, y: WALL_H / 2, z: -2.125 },
+
+    // ========================================
+    // BATHROOM WALLS (x: -4 to -2.5, z: -3 to 1) - EXPANDED
+    // ========================================
+    // North wall (z = 1)
+    { id: 'bath-north', w: 1.5 + WALL_T, h: WALL_H, d: WALL_T, x: -3.25, y: WALL_H / 2, z: 1 },
+    // South wall (z = -3) - expanded from -0.5
+    { id: 'bath-south', w: 1.5 + WALL_T, h: WALL_H, d: WALL_T, x: -3.25, y: WALL_H / 2, z: -3 },
+    // East wall (x = -2.5) - door opening from z=0.05 to z=0.6 (width 0.55m)
+    { id: 'bath-east-top', w: WALL_T, h: WALL_H, d: 0.4, x: -2.5, y: WALL_H / 2, z: 0.8 },
+    { id: 'bath-east-mid', w: WALL_T, h: WALL_H, d: 2.45, x: -2.5, y: WALL_H / 2, z: -1.725 },
+    { id: 'bath-east-bot', w: WALL_T, h: WALL_H, d: 0.55, x: -2.5, y: WALL_H / 2, z: -0.225 },
+
+    // ========================================
+    // MASTER BEDROOM SOUTH WALL (z = 1, x: -2.5 to 0)
+    // Door opening at x: -1.5 to -0.7 (access from hallway, not living room)
+    // ========================================
+    { id: 'master-south-left', w: 1.0, h: WALL_H, d: WALL_T, x: -2.0, y: WALL_H / 2, z: 1 },
+    { id: 'master-south-right', w: 0.7, h: WALL_H, d: WALL_T, x: -0.35, y: WALL_H / 2, z: 1 },
+
+    // ========================================
+    // SMALL BEDROOM WALLS (x: -2.5 to 0, z: -3.75 to -0.5)
+    // Shifted to the east, loggia area removed
+    // ========================================
+    // North wall (z = -0.5) - door at x: -0.9 to -0.1
+    { id: 'small-north-left', w: 1.6, h: WALL_H, d: WALL_T, x: -1.7, y: WALL_H / 2, z: -0.5 },
+    { id: 'small-north-right', w: 0.1, h: WALL_H, d: WALL_T, x: -0.05, y: WALL_H / 2, z: -0.5 },
+
+    // ========================================
+    // UTILITY CLOSET IN SMALL BEDROOM (corner for Battery + Solar Inverter)
+    // Small walled corner: x: -2.5 to -1.8, z: -3.75 to -3
+    // ========================================
+    { id: 'utility-north', w: 0.7, h: WALL_H, d: WALL_T, x: -2.15, y: WALL_H / 2, z: -3 },
+    { id: 'utility-east', w: WALL_T, h: WALL_H, d: 0.75, x: -1.8, y: WALL_H / 2, z: -3.375 },
+
+    // ========================================
+    // KITCHEN/DINING DIVIDER (z = -1.5, x: 0 to 4)
+    // Open plan - no wall, just floor transition
+    // ========================================
+
+    // ========================================
+    // BALCONY RAILING (z = 3.75, x: 2 to 4)
+    // Glass railing, shorter height
+    // ========================================
+    { id: 'balcony-rail', w: 2, h: 1.0, d: WALL_T, x: 3, y: 0.5, z: 4.25 },
+];
+
+// ==========================================
+// FLOORS ARRAY - Zone-specific textures
+// ==========================================
+const FLOORS: FloorDef[] = [
+    // Zone A: Common Area (Right Side) - TILE
+    { id: 'living-dining-kitchen', size: [4, 0.02, 7.5], pos: [2, 0.11, 0], matType: 'tile' },
+
+    // Balcony - TILE
+    { id: 'balcony', size: [2, 0.02, 0.5], pos: [3, 0.11, 4], matType: 'tile' },
+
+    // Zone B: Private Area - WOOD for bedrooms, TILE for bathroom
+    { id: 'master-bedroom', size: [4, 0.15, 2.75], pos: [-2, 0.075, 2.375], matType: 'wood' },
+    // Small bedroom shifted: x: -2.5 to 0, z: -3.75 to -0.5 (minus utility corner)
+    { id: 'small-bedroom', size: [2.5, 0.15, 3.25], pos: [-1.25, 0.075, -2.125], matType: 'wood' },
+    // Bathroom expanded: x: -4 to -2.5, z: -3 to 1
+    { id: 'bathroom', size: [1.5, 0.02, 4.0], pos: [-3.25, 0.11, -1.0], matType: 'tile' },
+    // Utility closet in small bedroom corner
+    { id: 'utility-closet', size: [0.7, 0.02, 0.75], pos: [-2.15, 0.11, -3.375], matType: 'tile' },
+];
+
+// ==========================================
+// WALL COMPONENT
+// ==========================================
+function Wall({ def, material }: { def: WallDef; material: THREE.Material }) {
+    return (
+        <mesh
+            position={[def.x, def.y, def.z]}
+            rotation={[0, def.ry || 0, 0]}
+            material={material}
+            castShadow
+            receiveShadow
+        >
+            <boxGeometry args={[def.w, def.h, def.d]} />
+        </mesh>
+    );
 }
 
-export default function FloorPlan() {
-  const woodMat = useMemo(() => makeWoodFloorMat(), []);
-  const tileMat = useMemo(() => makeTileMat(), []);
-  const wallMat = useMemo(() => makeWallMat(), []);
-
-  // Sàn nhà
-  const floorSlabs: FloorSlab[] = [
-    { size: [16, 0.15, 12], pos: [0, 0.075, 0], mat: woodMat }, // Sàn chính
-    { size: [6, 0.02, 4.5], pos: [-5, 0.11, 2.25], mat: tileMat }, // Bếp
-    { size: [2.5, 0.02, 2.5], pos: [-6.75, 0.12, 0.25], mat: tileMat }, // WC
-    { size: [8, 0.02, 1.5], pos: [0, 0.11, 6.0], mat: tileMat }, // Ban công trước
-    { size: [2, 0.02, 8], pos: [9, 0.11, 0], mat: tileMat }, // Ban công bên
-  ];
-
-  const walls: WallSeg[] = [
-    // --- TƯỜNG BAO (PERIMETER) ---
-    { w: 16, h: WALL_H, d: WALL_T, x: 0, y: WALL_H / 2, z: -6 }, // Sau
-    { w: 16, h: WALL_H, d: WALL_T, x: 0, y: WALL_H / 2, z: 6 }, // Trước
-    { w: WALL_T, h: WALL_H, d: 12, x: -8, y: WALL_H / 2, z: 0 }, // Trái
-    { w: WALL_T, h: WALL_H, d: 12, x: 8, y: WALL_H / 2, z: 0 }, // Phải
-
-    // --- TƯỜNG NGĂN DỌC (VERTICAL) ---
-    // Ngăn Phòng Khách | Hành lang (x=2)
-    { w: WALL_T, h: WALL_H, d: 12, x: 2, y: WALL_H / 2, z: 0 },
-
-    // Ngăn Hành lang | Khu Ngủ (x=5) - QUAN TRỌNG: Chừa lối đi
-    // Đoạn 1: Từ trên xuống cửa
-    { w: WALL_T, h: WALL_H, d: 5, x: 5, y: WALL_H / 2, z: -3.5 },
-    // Đoạn 2: Từ cửa xuống dưới
-    { w: WALL_T, h: WALL_H, d: 5, x: 5, y: WALL_H / 2, z: 3.5 },
-
-    // --- TƯỜNG NGĂN NGANG (HORIZONTAL) - CÁI BẠN ĐANG THIẾU ---
-    // Bức tường chia đôi 2 phòng ngủ bên phải.
-    // Tọa độ z=0.8. Nối từ tường x=5 đến x=8.
-    { w: 3, h: WALL_H, d: WALL_T, x: 6.5, y: WALL_H / 2, z: 0.8 },
-
-    // --- VÁCH BẾP & WC ---
-    { w: 4, h: WALL_H, d: WALL_T, x: 0, y: WALL_H / 2, z: -2.5 }, // Hành lang trên
-    { w: 4, h: WALL_H, d: WALL_T, x: 0, y: WALL_H / 2, z: 1.5 }, // Hành lang dưới
-    { w: WALL_T, h: WALL_H, d: 4.5, x: -2, y: WALL_H / 2, z: 1.25 }, // Ngăn Bếp/Khách
-    { w: 3, h: WALL_H, d: WALL_T, x: -6.5, y: WALL_H / 2, z: -1 }, // Ngăn Bếp/WC
-    { w: 2.5, h: WALL_H, d: WALL_T, x: -6.75, y: WALL_H / 2, z: 1.5 }, // Lưng WC
-    { w: WALL_T, h: WALL_H, d: 2.5, x: -8, y: WALL_H / 2, z: 0.25 }, // Hông WC
-
-    // Lan can ban công
-    { w: 8, h: 1.0, d: WALL_T, x: 0, y: 0.5, z: 6.0 },
-    { w: WALL_T, h: 1.0, d: 8, x: 8, y: 0.5, z: 0 },
-  ];
-
-  return (
-    <group>
-      {floorSlabs.map((slab, i) => (
-        <mesh key={`slab-${i}`} position={slab.pos} receiveShadow>
-          <boxGeometry args={slab.size} />
-          <primitive object={slab.mat} attach="material" />
+// ==========================================
+// FLOOR COMPONENT
+// ==========================================
+function Floor({ def, woodMat, tileMat }: { def: FloorDef; woodMat: THREE.Material; tileMat: THREE.Material }) {
+    const material = def.matType === 'wood' ? woodMat : tileMat;
+    return (
+        <mesh position={def.pos} receiveShadow>
+            <boxGeometry args={def.size} />
+            <primitive object={material} attach="material" />
         </mesh>
-      ))}
-      {walls.map((seg, i) => (
-        <Wall key={`wall-${i}`} seg={seg} material={wallMat} />
-      ))}
-    </group>
-  );
+    );
+}
+
+// ==========================================
+// MAIN FLOORPLAN COMPONENT
+// ==========================================
+export default function FloorPlan() {
+    const woodMat = useMemo(() => makeWoodFloorMat(), []);
+    const tileMat = useMemo(() => makeTileMat(), []);
+    const wallMat = useMemo(() => makeWallMat(), []);
+
+    return (
+        <group>
+            {/* Render all floor slabs */}
+            {FLOORS.map((floor) => (
+                <Floor key={floor.id} def={floor} woodMat={woodMat} tileMat={tileMat} />
+            ))}
+
+            {/* Render all walls */}
+            {WALLS.map((wall) => (
+                <Wall key={wall.id} def={wall} material={wallMat} />
+            ))}
+        </group>
+    );
 }

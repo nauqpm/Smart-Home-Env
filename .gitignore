@@ -1,0 +1,18 @@
+# Python rác
+__pycache__/
+*.pyc
+
+# Thư viện ảo (QUAN TRỌNG)
+venv/
+env/
+.venv/
+
+# IDE settings
+.idea/
+.vscode/
+
+# File model nặng (như đã nói ở trên)
+*.zip
+*.pth
+*.npy
+*.onnx

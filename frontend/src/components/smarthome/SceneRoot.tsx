@@ -1,14 +1,17 @@
 import React, { Suspense, useMemo, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { OrbitControls, SoftShadows, OrthographicCamera } from '@react-three/drei';
 import FloorPlan from './FloorPlan';
 import Furniture from './Furniture';
 import Appliances from './Appliances';
 import Environment from './Environment';
 import Overlay from './Overlay';
+import RoomLights from './RoomLights';
 import { useStore } from '../../stores/useStore';
 
-const cameraPos: [number, number, number] = [14, 12, 14];
+// Orthographic camera settings for isometric view
+// Zoom level calculated to frame 8x7.5m rectangle
+const ZOOM = 55;
 
 export default function SceneRoot() {
   const { isNight, tick } = useStore();
@@ -34,7 +37,13 @@ export default function SceneRoot() {
   return (
     <Canvas
       shadows
-      camera={{ position: cameraPos, fov: 45, near: 0.1, far: 100 }}
+      orthographic
+      camera={{
+        zoom: ZOOM,
+        position: [12, 10, 12],
+        near: 0.1,
+        far: 100,
+      }}
       onCreated={({ gl }) => {
         gl.setClearColor(lightSettings.background);
       }}
@@ -42,12 +51,28 @@ export default function SceneRoot() {
       <color attach="background" args={[lightSettings.background]} />
       <ambientLight intensity={lightSettings.ambient} />
       <hemisphereLight args={['#ffffff', '#dddddd', lightSettings.hemi]} />
+      <SoftShadows size={12} focus={0.5} samples={12} />
+
+      {/* Directional sunlight for shadows */}
+      <directionalLight
+        position={[10, 15, 10]}
+        intensity={lightSettings.sun}
+        castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-far={50}
+        shadow-camera-left={-10}
+        shadow-camera-right={10}
+        shadow-camera-top={10}
+        shadow-camera-bottom={-10}
+      />
 
       {/* Global Dashboard Overlay */}
       <Overlay />
 
       <Suspense fallback={null}>
         <Environment />
+        <RoomLights />
         <group position={[0, -0.5, 0]}>
           <FloorPlan />
           <Furniture />
@@ -57,12 +82,13 @@ export default function SceneRoot() {
 
       <OrbitControls
         enableDamping
-        dampingFactor={0.08}
-        minDistance={8}
-        maxDistance={28}
-        maxPolarAngle={Math.PI / 2.2}
+        dampingFactor={0.05}
+        minZoom={30}
+        maxZoom={100}
+        maxPolarAngle={Math.PI / 2.1}
+        enableRotate={true}
+        enablePan={true}
       />
     </Canvas>
   );
 }
-
