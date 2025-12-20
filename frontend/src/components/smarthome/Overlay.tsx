@@ -1,27 +1,50 @@
 import React, { useState } from 'react';
-import { Html } from '@react-three/drei';
+import { createPortal } from 'react-dom';
 import { useStore } from '../../stores/useStore';
-import InputPanel from './InputPanel';
 import ComparisonDashboard from './ComparisonDashboard';
 
 export default function Overlay() {
     const {
         devices, isNight, batterySOC, gridImport, totalBill, weather, n_home,
-        simData, simStep, isLoading, currentModelView,
-        fetchSimulation, setSimStep, setModelView, toggleNight
+        simData, currentViewMode, setViewMode, toggleNight, isConnected
     } = useStore();
 
-    const [activeTab, setActiveTab] = useState<'sim' | 'dashboard' | 'devices'>('sim');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'devices'>('dashboard');
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     const weatherIcon: Record<string, string> = {
         sunny: '☀️', mild: '🌤️', cloudy: '☁️', rainy: '🌧️', stormy: '⛈️'
     };
 
-    const timeDisplay = `Day 1 - ${simStep.toString().padStart(2, '0')}:00`;
+    const timeDisplay = simData?.timestamp || '--:--';
 
-    return (
-        <Html fullscreen style={{ pointerEvents: 'none' }}>
+    // Use createPortal to render outside Canvas, keeping overlay fixed on screen
+    const overlayContent = (
+        <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 100 }}>
+            {/* Connection Status Indicator */}
+            <div style={{
+                position: 'absolute',
+                top: 20,
+                left: 20,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'rgba(10, 15, 25, 0.9)',
+                padding: '8px 14px',
+                borderRadius: 20,
+                pointerEvents: 'auto',
+                border: isConnected ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)',
+            }}>
+                <div style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: isConnected ? '#22c55e' : '#ef4444',
+                    boxShadow: isConnected ? '0 0 8px #22c55e' : '0 0 8px #ef4444',
+                }} />
+                <span style={{ fontSize: 11, color: isConnected ? '#86efac' : '#fca5a5', fontWeight: 600 }}>
+                    {isConnected ? 'LIVE' : 'DISCONNECTED'}
+                </span>
+            </div>
+
             {/* Collapsed State */}
             {isCollapsed && (
                 <div
@@ -56,8 +79,8 @@ export default function Overlay() {
                     position: 'absolute',
                     top: 20,
                     right: 20,
-                    width: 400,
-                    maxHeight: '90vh',
+                    width: 520,
+                    maxHeight: '92vh',
                     background: 'rgba(10, 15, 25, 0.95)',
                     backdropFilter: 'blur(16px)',
                     borderRadius: 16,
@@ -76,7 +99,7 @@ export default function Overlay() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#00e5ff' }}>
-                                SMART HOME <span style={{ fontSize: 12, fontWeight: 400, color: '#fff' }}>TWIN SIM</span>
+                                SMART HOME <span style={{ fontSize: 12, fontWeight: 400, color: '#fff' }}>COMPARISON DASHBOARD</span>
                             </h2>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                                 <span style={{ fontSize: 16 }}>{weatherIcon[weather] || '☀️'}</span>
@@ -113,7 +136,7 @@ export default function Overlay() {
 
                     {/* Tabs */}
                     <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 4 }}>
-                        {['sim', 'dashboard', 'devices'].map(tab => (
+                        {['dashboard', 'devices'].map(tab => (
                             <div
                                 key={tab}
                                 onClick={() => setActiveTab(tab as any)}
@@ -124,93 +147,109 @@ export default function Overlay() {
                                     color: activeTab === tab ? '#fff' : '#666'
                                 }}
                             >
-                                {tab}
+                                {tab === 'dashboard' ? '📊 Comparison' : '🔌 Devices'}
                             </div>
                         ))}
                     </div>
 
-                    {activeTab === 'sim' && (
-                        <>
-                            <InputPanel onSimulate={fetchSimulation} isLoading={isLoading} />
-                            {simData && (
-                                <div style={{ marginTop: 8 }}>
-                                    <div style={{ fontSize: 11, color: '#aaa', marginBottom: 8, textTransform: 'uppercase' }}>
-                                        Time Travel <span style={{ color: '#fff' }}>{simStep}:00</span>
-                                    </div>
-                                    <input
-                                        type="range" min="0" max="23" value={simStep}
-                                        onChange={(e) => setSimStep(parseInt(e.target.value))}
-                                        style={{ width: '100%', accentColor: '#00e5ff', cursor: 'pointer' }}
-                                    />
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 9, color: '#666' }}>
-                                        <span>00:00</span><span>12:00</span><span>23:00</span>
-                                    </div>
-                                    <div style={{ marginTop: 16 }}>
-                                        <div style={{ fontSize: 11, color: '#aaa', marginBottom: 8, textTransform: 'uppercase' }}>Current View Model</div>
-                                        <div style={{ display: 'flex', gap: 8 }}>
-                                            <button
-                                                onClick={() => setModelView('ppo')}
-                                                style={{
-                                                    flex: 1, padding: 8, borderRadius: 6, border: '1px solid',
-                                                    background: currentModelView === 'ppo' ? 'rgba(255, 82, 82, 0.2)' : 'transparent',
-                                                    borderColor: currentModelView === 'ppo' ? '#ff5252' : '#333',
-                                                    color: currentModelView === 'ppo' ? '#ff5252' : '#666',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                PPO (Baseline)
-                                            </button>
-                                            <button
-                                                onClick={() => setModelView('hybrid')}
-                                                style={{
-                                                    flex: 1, padding: 8, borderRadius: 6, border: '1px solid',
-                                                    background: currentModelView === 'hybrid' ? 'rgba(76, 175, 80, 0.2)' : 'transparent',
-                                                    borderColor: currentModelView === 'hybrid' ? '#4caf50' : '#333',
-                                                    color: currentModelView === 'hybrid' ? '#4caf50' : '#666',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                Hybrid (Proposed)
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    )}
+                    {/* Dashboard Tab */}
+                    {activeTab === 'dashboard' && <ComparisonDashboard />}
 
-                    {activeTab === 'dashboard' && <ComparisonDashboard data={simData} />}
-
+                    {/* Devices Tab */}
                     {activeTab === 'devices' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, maxHeight: 400, overflowY: 'auto', paddingRight: 4 }}>
-                            {Object.values(devices).map((device) => (
-                                <div
-                                    key={device.id}
-                                    style={{
-                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                        background: device.isOn ? 'rgba(0, 229, 255, 0.1)' : 'rgba(255,255,255,0.03)',
-                                        padding: '10px 14px', borderRadius: 8,
-                                        border: device.isOn ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid rgba(255,255,255,0.05)'
-                                    }}
-                                >
-                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                        <span style={{ fontSize: 12, fontWeight: 500, color: device.isOn ? '#fff' : '#aaa' }}>{device.name}</span>
-                                        <span style={{ fontSize: 10, color: device.isOn ? '#00e5ff' : '#555' }}>
-                                            {device.isOn ? `${device.currentPower} W` : 'Standby'}
-                                        </span>
-                                    </div>
-                                    <div style={{
-                                        width: 10, height: 10,
-                                        background: device.isOn ? '#00e5ff' : '#333',
-                                        borderRadius: '50%',
-                                        boxShadow: device.isOn ? '0 0 8px #00e5ff' : 'none'
-                                    }} />
+                        <div>
+                            {/* View Mode Toggle */}
+                            <div style={{ marginBottom: 16 }}>
+                                <div style={{ fontSize: 11, color: '#aaa', marginBottom: 8, textTransform: 'uppercase' }}>
+                                    Viewing: {currentViewMode.toUpperCase()} Agent Devices
                                 </div>
-                            ))}
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button
+                                        onClick={() => setViewMode('ppo')}
+                                        style={{
+                                            flex: 1, padding: 8, borderRadius: 6, border: '1px solid',
+                                            background: currentViewMode === 'ppo' ? 'rgba(244, 114, 182, 0.2)' : 'transparent',
+                                            borderColor: currentViewMode === 'ppo' ? '#f472b6' : '#333',
+                                            color: currentViewMode === 'ppo' ? '#f472b6' : '#666',
+                                            cursor: 'pointer', fontSize: 12, fontWeight: 600
+                                        }}
+                                    >
+                                        🤖 PPO
+                                    </button>
+                                    <button
+                                        onClick={() => setViewMode('hybrid')}
+                                        style={{
+                                            flex: 1, padding: 8, borderRadius: 6, border: '1px solid',
+                                            background: currentViewMode === 'hybrid' ? 'rgba(34, 211, 238, 0.2)' : 'transparent',
+                                            borderColor: currentViewMode === 'hybrid' ? '#22d3ee' : '#333',
+                                            color: currentViewMode === 'hybrid' ? '#22d3ee' : '#666',
+                                            cursor: 'pointer', fontSize: 12, fontWeight: 600
+                                        }}
+                                    >
+                                        🧠 Hybrid
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Device List */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
+                                {Object.values(devices).map((device) => (
+                                    <div
+                                        key={device.id}
+                                        style={{
+                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                            background: device.isOn ? 'rgba(0, 229, 255, 0.1)' : 'rgba(255,255,255,0.03)',
+                                            padding: '10px 14px', borderRadius: 8,
+                                            border: device.isOn ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid rgba(255,255,255,0.05)'
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                            <span style={{ fontSize: 12, fontWeight: 500, color: device.isOn ? '#fff' : '#aaa' }}>{device.name}</span>
+                                            <span style={{ fontSize: 10, color: device.isOn ? '#00e5ff' : '#555' }}>
+                                                {device.isOn ? `${device.currentPower} W` : 'Standby'}
+                                            </span>
+                                        </div>
+                                        <div style={{
+                                            width: 10, height: 10,
+                                            background: device.isOn ? '#00e5ff' : '#333',
+                                            borderRadius: '50%',
+                                            boxShadow: device.isOn ? '0 0 8px #00e5ff' : 'none'
+                                        }} />
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Stats Footer */}
+                            <div style={{
+                                marginTop: 16, padding: 12, background: 'rgba(0,0,0,0.3)',
+                                borderRadius: 8, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12
+                            }}>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 10, color: '#64748b' }}>Battery SOC</div>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: batterySOC > 0.3 ? '#22c55e' : '#ef4444' }}>
+                                        {(batterySOC * 100).toFixed(0)}%
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 10, color: '#64748b' }}>Grid</div>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: '#f59e0b' }}>
+                                        {gridImport > 0 ? '+' : ''}{(gridImport / 1000).toFixed(1)} kW
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 10, color: '#64748b' }}>Total Bill</div>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: '#8b5cf6' }}>
+                                        {(totalBill / 1000).toFixed(1)}K
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
             )}
-        </Html>
+        </div>
     );
+
+    // Portal to document.body so overlay stays fixed when 3D camera moves
+    return createPortal(overlayContent, document.body);
 }

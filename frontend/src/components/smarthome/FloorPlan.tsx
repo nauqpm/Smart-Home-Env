@@ -160,6 +160,18 @@ export default function FloorPlan() {
     const tileMat = useMemo(() => makeTileMat(), []);
     const wallMat = useMemo(() => makeWallMat(), []);
 
+    // Ceiling trim material (off-white)
+    const trimMat = useMemo(() => new THREE.MeshStandardMaterial({
+        color: 0xf5f5f0,
+        roughness: 0.3,
+        metalness: 0.0,
+    }), []);
+
+    // Ceiling trim dimensions
+    const TRIM_H = 0.08;  // Height (8cm)
+    const TRIM_D = 0.04;  // Depth/thickness (4cm)
+    const TRIM_Y = WALL_H - TRIM_H / 2;  // Position at top of wall
+
     return (
         <group>
             {/* Render all floor slabs */}
@@ -171,6 +183,95 @@ export default function FloorPlan() {
             {WALLS.map((wall) => (
                 <Wall key={wall.id} def={wall} material={wallMat} />
             ))}
+
+            {/* ============================================ */}
+            {/* CEILING TRIM - Continuous molding at wall-ceiling junction */}
+            {/* ============================================ */}
+            <group name="ceiling-trim">
+                {/* Perimeter trim - North wall */}
+                <mesh position={[0, TRIM_Y, 3.75 + WALL_T / 2 - TRIM_D / 2]}>
+                    <boxGeometry args={[8 + WALL_T, TRIM_H, TRIM_D]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Perimeter trim - South wall */}
+                <mesh position={[0, TRIM_Y, -3.75 - WALL_T / 2 + TRIM_D / 2]}>
+                    <boxGeometry args={[8 + WALL_T, TRIM_H, TRIM_D]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Perimeter trim - West wall */}
+                <mesh position={[-4 - WALL_T / 2 + TRIM_D / 2, TRIM_Y, 0]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 7.5 + WALL_T]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Perimeter trim - East wall */}
+                <mesh position={[4 + WALL_T / 2 - TRIM_D / 2, TRIM_Y, 0]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 7.5 + WALL_T]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Zone divider trim - Upper section */}
+                <mesh position={[TRIM_D / 2, TRIM_Y, 2.375]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 2.75]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+                <mesh position={[-TRIM_D / 2, TRIM_Y, 2.375]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 2.75]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Zone divider trim - Lower section */}
+                <mesh position={[TRIM_D / 2, TRIM_Y, -2.125]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 3.25]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+                <mesh position={[-TRIM_D / 2, TRIM_Y, -2.125]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 3.25]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Bathroom trim - North */}
+                <mesh position={[-3.25, TRIM_Y, 1 - TRIM_D / 2]}>
+                    <boxGeometry args={[1.5 + WALL_T, TRIM_H, TRIM_D]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Bathroom trim - South */}
+                <mesh position={[-3.25, TRIM_Y, -3 + TRIM_D / 2]}>
+                    <boxGeometry args={[1.5 + WALL_T, TRIM_H, TRIM_D]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Bathroom trim - East side */}
+                <mesh position={[-2.5 + TRIM_D / 2, TRIM_Y, -1]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 4]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Master bedroom south wall trim */}
+                <mesh position={[-1.25, TRIM_Y, 1 + TRIM_D / 2]}>
+                    <boxGeometry args={[2.5, TRIM_H, TRIM_D]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Small bedroom north wall trim */}
+                <mesh position={[-1.25, TRIM_Y, -0.5 - TRIM_D / 2]}>
+                    <boxGeometry args={[2.5, TRIM_H, TRIM_D]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+
+                {/* Utility closet trim */}
+                <mesh position={[-2.15, TRIM_Y, -3 - TRIM_D / 2]}>
+                    <boxGeometry args={[0.7, TRIM_H, TRIM_D]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+                <mesh position={[-1.8 + TRIM_D / 2, TRIM_Y, -3.375]}>
+                    <boxGeometry args={[TRIM_D, TRIM_H, 0.75]} />
+                    <primitive object={trimMat} attach="material" />
+                </mesh>
+            </group>
         </group>
     );
 }

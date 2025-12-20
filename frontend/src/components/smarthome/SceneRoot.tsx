@@ -1,6 +1,7 @@
-import React, { Suspense, useMemo, useEffect } from 'react';
+import React, { Suspense, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, SoftShadows, OrthographicCamera } from '@react-three/drei';
+import { OrbitControls, SoftShadows, PerspectiveCamera } from '@react-three/drei';
+import * as THREE from 'three';
 import FloorPlan from './FloorPlan';
 import Furniture from './Furniture';
 import Appliances from './Appliances';
@@ -9,21 +10,10 @@ import Overlay from './Overlay';
 import RoomLights from './RoomLights';
 import { useStore } from '../../stores/useStore';
 
-// Orthographic camera settings for isometric view
-// Zoom level calculated to frame 8x7.5m rectangle
-const ZOOM = 55;
-
 export default function SceneRoot() {
-  const { isNight, tick } = useStore();
+  const { isNight } = useStore();
 
-  // Heartbeat System: Simulates fluctuation every 1 second
-  useEffect(() => {
-    const interval = setInterval(() => {
-      tick();
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [tick]);
-
+  // Light settings based on day/night
   const lightSettings = useMemo(
     () => ({
       ambient: isNight ? 0.35 : 0.6,
@@ -35,60 +25,79 @@ export default function SceneRoot() {
   );
 
   return (
-    <Canvas
-      shadows
-      orthographic
-      camera={{
-        zoom: ZOOM,
-        position: [12, 10, 12],
-        near: 0.1,
-        far: 100,
-      }}
-      onCreated={({ gl }) => {
-        gl.setClearColor(lightSettings.background);
-      }}
-    >
-      <color attach="background" args={[lightSettings.background]} />
-      <ambientLight intensity={lightSettings.ambient} />
-      <hemisphereLight args={['#ffffff', '#dddddd', lightSettings.hemi]} />
-      <SoftShadows size={12} focus={0.5} samples={12} />
+    <>
+      {/* 3D Canvas */}
+      <Canvas
+        shadows
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
+        onCreated={({ gl }) => {
+          gl.setClearColor(lightSettings.background);
+        }}
+      >
+        {/* Perspective Camera for better 3D feel */}
+        <PerspectiveCamera
+          makeDefault
+          position={[10, 10, 10]}
+          fov={45}
+          near={0.1}
+          far={200}
+        />
 
-      {/* Directional sunlight for shadows */}
-      <directionalLight
-        position={[10, 15, 10]}
-        intensity={lightSettings.sun}
-        castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-far={50}
-        shadow-camera-left={-10}
-        shadow-camera-right={10}
-        shadow-camera-top={10}
-        shadow-camera-bottom={-10}
-      />
+        {/* Interactive Camera Controls */}
+        <OrbitControls
+          makeDefault
+          enableDamping={true}
+          dampingFactor={0.05}
+          minDistance={5}
+          maxDistance={30}
+          minPolarAngle={Math.PI / 6}
+          maxPolarAngle={Math.PI / 2.2}
+          target={[0, 0, 0]}
+          enablePan={true}
+          enableZoom={true}
+          enableRotate={true}
+          panSpeed={0.8}
+          rotateSpeed={0.6}
+          zoomSpeed={1.0}
+          screenSpacePanning={true}
+        />
 
-      {/* Global Dashboard Overlay */}
+        {/* Background */}
+        <color attach="background" args={[lightSettings.background]} />
+
+        {/* Lighting */}
+        <ambientLight intensity={lightSettings.ambient} />
+        <hemisphereLight args={['#ffffff', '#dddddd', lightSettings.hemi]} />
+        <SoftShadows size={12} focus={0.5} samples={12} />
+
+        {/* Directional sunlight for shadows */}
+        <directionalLight
+          position={[10, 15, 10]}
+          intensity={lightSettings.sun}
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+          shadow-camera-far={50}
+          shadow-camera-left={-10}
+          shadow-camera-right={10}
+          shadow-camera-top={10}
+          shadow-camera-bottom={-10}
+        />
+
+        {/* 3D Scene Content */}
+        <Suspense fallback={null}>
+          <Environment />
+          <RoomLights />
+          <group position={[0, -0.5, 0]}>
+            <FloorPlan />
+            <Furniture />
+            <Appliances />
+          </group>
+        </Suspense>
+      </Canvas>
+
+      {/* UI Overlay - rendered OUTSIDE Canvas so it stays fixed when camera moves */}
       <Overlay />
-
-      <Suspense fallback={null}>
-        <Environment />
-        <RoomLights />
-        <group position={[0, -0.5, 0]}>
-          <FloorPlan />
-          <Furniture />
-          <Appliances />
-        </group>
-      </Suspense>
-
-      <OrbitControls
-        enableDamping
-        dampingFactor={0.05}
-        minZoom={30}
-        maxZoom={100}
-        maxPolarAngle={Math.PI / 2.1}
-        enableRotate={true}
-        enablePan={true}
-      />
-    </Canvas>
+    </>
   );
 }

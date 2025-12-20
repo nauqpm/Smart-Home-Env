@@ -1,198 +1,224 @@
 import { create } from 'zustand';
 
+// --- 1. Define Data Contract Interfaces ---
+
+interface EnvironmentData {
+    weather: 'sunny' | 'mild' | 'cloudy' | 'rainy' | 'stormy';
+    temp: number;
+    pv: number;
+    price_tier: number;
+}
+
+// Room-specific device actions
+interface AgentAction {
+    // ACs by room
+    ac_living: number;
+    ac_master: number;
+    ac_bed2: number;
+    // Lights by room
+    light_living: number;
+    light_master: number;
+    light_bed2: number;
+    light_kitchen: number;
+    light_toilet: number;
+    // Other devices
+    wm: number;
+    ev: number;
+    battery: 'charge' | 'discharge' | 'idle';
+}
+
+interface AgentData {
+    bill: number;
+    soc: number;
+    grid: number;
+    actions: AgentAction;
+    comfort: number;
+}
+
+export interface SimulationPacket {
+    timestamp: string;
+    env: EnvironmentData;
+    ppo: AgentData;
+    hybrid: AgentData;
+}
+
+// --- 2. Device State for 3D Visualization ---
+
 export interface Device {
     id: string;
     name: string;
+    room?: string;
     type: 'light' | 'ac' | 'tv' | 'fan' | 'washer' | 'fridge' | 'charger' | 'laptop' | 'solar';
     isOn: boolean;
-    basePower: number; // Watts
-    currentPower: number; // Watts
+    basePower: number;
+    currentPower: number;
 }
 
-// Data structure returned by Backend API
-export interface SimStepData {
-    hour: number;
-    soc: number;
-    grid: number; // net import/export
-    load: number;
-    pv: number;
-    temp: number;
-    reward: number;
-    total_bill: number;
-    n_home: number;
-    weather: string;
-    devices: {
-        washer: boolean;
-        dishwasher: boolean;
-        charger: boolean;
-        ac_living: boolean;
-        ac_master: boolean;
-        tv: boolean;
-        fridge: boolean;
-        lights: boolean;
-    };
-}
+// --- 3. Define Store State ---
 
-interface SimDataPacket {
-    ppo: SimStepData[];
-    hybrid: SimStepData[];
-}
+interface AppState {
+    isConnected: boolean;
+    setIsConnected: (status: boolean) => void;
 
-interface State {
+    simData: SimulationPacket | null;
+    updateSimData: (data: SimulationPacket) => void;
+
+    currentViewMode: 'ppo' | 'hybrid';
+    setViewMode: (mode: 'ppo' | 'hybrid') => void;
+
+    history: SimulationPacket[];
     devices: Record<string, Device>;
-    metricsHistory: { time: string; power: number; temperature: number }[];
+
     isNight: boolean;
+    toggleNight: () => void;
 
-    // AI / Backend State
-    aiMode: boolean; // Not used as much in Replay, but kept for UI toggle
-    batterySOC: number; // 0.0 - 1.0
-    gridPrice: number; // $/kWh or VND
-    gridImport: number; // W
-    decisionLog: string[];
-    totalBill: number; // Accumulating Bill in VND
-
-    // Environmental Context
+    // Legacy compatibility
+    batterySOC: number;
+    gridImport: number;
+    totalBill: number;
     weather: string;
     n_home: number;
-
-    // Simulation & Replay
-    simData: SimDataPacket | null;
-    currentModelView: 'ppo' | 'hybrid';
-    simStep: number; // 0..23
-    isLoading: boolean;
-
-    // Actions
-    fetchSimulation: (config: any) => Promise<void>;
-    setSimStep: (step: number) => void;
-    setModelView: (model: 'ppo' | 'hybrid') => void;
-    toggleDevice: (id: string) => void;
-    toggleNight: () => void;
-    tick: () => void; // Used for auto-play loop if we keep it
 }
 
 const INITIAL_DEVICES: Record<string, Device> = {
-    tv: { id: 'tv', name: 'Smart TV', type: 'tv', isOn: false, basePower: 150, currentPower: 0 },
-    fridge: { id: 'fridge', name: 'Smart Fridge', type: 'fridge', isOn: true, basePower: 200, currentPower: 200 },
-    washer: { id: 'washer', name: 'Washer', type: 'washer', isOn: false, basePower: 500, currentPower: 0 },
-    ac_living: { id: 'ac_living', name: 'AC Living', type: 'ac', isOn: false, basePower: 1500, currentPower: 0 },
-    ac_master: { id: 'ac_master', name: 'AC Master', type: 'ac', isOn: false, basePower: 1000, currentPower: 0 },
-    fan: { id: 'fan', name: 'Ceiling Fan', type: 'fan', isOn: true, basePower: 75, currentPower: 75 },
-    charger: { id: 'charger', name: 'EV Charger', type: 'charger', isOn: false, basePower: 7000, currentPower: 0 },
-    laptop: { id: 'laptop', name: 'Laptop', type: 'laptop', isOn: false, basePower: 65, currentPower: 0 },
-    lamp: { id: 'lamp', name: 'Smart Light', type: 'light', isOn: false, basePower: 15, currentPower: 0 },
+    // ACs by room
+    ac_living: { id: 'ac_living', name: 'AC Living Room', room: 'living', type: 'ac', isOn: false, basePower: 1500, currentPower: 0 },
+    ac_master: { id: 'ac_master', name: 'AC Master Bedroom', room: 'master', type: 'ac', isOn: false, basePower: 1200, currentPower: 0 },
+    ac_bed2: { id: 'ac_bed2', name: 'AC 2nd Bedroom', room: 'bed2', type: 'ac', isOn: false, basePower: 1000, currentPower: 0 },
+
+    // Lights by room
+    light_living: { id: 'light_living', name: 'Living Room Light', room: 'living', type: 'light', isOn: false, basePower: 20, currentPower: 0 },
+    light_master: { id: 'light_master', name: 'Master Bedroom Light', room: 'master', type: 'light', isOn: false, basePower: 15, currentPower: 0 },
+    light_bed2: { id: 'light_bed2', name: '2nd Bedroom Light', room: 'bed2', type: 'light', isOn: false, basePower: 15, currentPower: 0 },
+    light_kitchen: { id: 'light_kitchen', name: 'Kitchen Light', room: 'kitchen', type: 'light', isOn: false, basePower: 20, currentPower: 0 },
+    light_toilet: { id: 'light_toilet', name: 'Toilet Light', room: 'toilet', type: 'light', isOn: false, basePower: 10, currentPower: 0 },
+
+    // Other appliances
+    tv: { id: 'tv', name: 'Smart TV', room: 'living', type: 'tv', isOn: false, basePower: 150, currentPower: 0 },
+    fridge: { id: 'fridge', name: 'Smart Fridge', room: 'kitchen', type: 'fridge', isOn: true, basePower: 200, currentPower: 200 },
+    washer: { id: 'washer', name: 'Washing Machine', room: 'utility', type: 'washer', isOn: false, basePower: 500, currentPower: 0 },
+    charger: { id: 'charger', name: 'EV Charger', room: 'garage', type: 'charger', isOn: false, basePower: 7000, currentPower: 0 },
 };
 
-export const useStore = create<State>((set, get) => ({
-    devices: INITIAL_DEVICES,
-    metricsHistory: [],
-    isNight: false,
-
-    aiMode: true,
-    batterySOC: 0.5,
-    gridPrice: 2540,
-    gridImport: 0,
-    decisionLog: ['System Ready'],
-    totalBill: 0,
-    weather: 'sunny',
-    n_home: 2,
+export const useStore = create<AppState>((set, get) => ({
+    isConnected: false,
+    setIsConnected: (status) => set({ isConnected: status }),
 
     simData: null,
-    currentModelView: 'hybrid', // Default to showing the better model
-    simStep: 0,
-    isLoading: false,
+    history: [],
 
-    fetchSimulation: async (config) => {
-        set({ isLoading: true });
-        try {
-            const response = await fetch('http://localhost:8000/simulate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config)
-            });
-            const data = await response.json();
-            if (data && data.ppo && data.hybrid) {
-                set({
-                    simData: data,
-                    simStep: 0,
-                    isLoading: false,
-                    decisionLog: [`Simulation Completed. Loaded ${data.ppo.length} steps.`]
-                });
-                // Trigger initial update
-                get().setSimStep(0);
+    updateSimData: (data) => set((state) => {
+        const newHistory = [...state.history, data].slice(-24);
+        const agentData = data[state.currentViewMode];
+        const actions = agentData?.actions;
+
+        // Update device states based on room-specific agent actions
+        const newDevices = { ...state.devices };
+
+        if (actions) {
+            // Update ACs
+            newDevices.ac_living.isOn = actions.ac_living === 1;
+            newDevices.ac_living.currentPower = actions.ac_living === 1 ? newDevices.ac_living.basePower : 0;
+
+            newDevices.ac_master.isOn = actions.ac_master === 1;
+            newDevices.ac_master.currentPower = actions.ac_master === 1 ? newDevices.ac_master.basePower : 0;
+
+            newDevices.ac_bed2.isOn = actions.ac_bed2 === 1;
+            newDevices.ac_bed2.currentPower = actions.ac_bed2 === 1 ? newDevices.ac_bed2.basePower : 0;
+
+            // Update Lights
+            newDevices.light_living.isOn = actions.light_living === 1;
+            newDevices.light_living.currentPower = actions.light_living === 1 ? newDevices.light_living.basePower : 0;
+
+            newDevices.light_master.isOn = actions.light_master === 1;
+            newDevices.light_master.currentPower = actions.light_master === 1 ? newDevices.light_master.basePower : 0;
+
+            newDevices.light_bed2.isOn = actions.light_bed2 === 1;
+            newDevices.light_bed2.currentPower = actions.light_bed2 === 1 ? newDevices.light_bed2.basePower : 0;
+
+            newDevices.light_kitchen.isOn = actions.light_kitchen === 1;
+            newDevices.light_kitchen.currentPower = actions.light_kitchen === 1 ? newDevices.light_kitchen.basePower : 0;
+
+            newDevices.light_toilet.isOn = actions.light_toilet === 1;
+            newDevices.light_toilet.currentPower = actions.light_toilet === 1 ? newDevices.light_toilet.basePower : 0;
+
+            // Update other devices
+            newDevices.washer.isOn = actions.wm === 1;
+            newDevices.washer.currentPower = actions.wm === 1 ? newDevices.washer.basePower : 0;
+
+            newDevices.charger.isOn = actions.ev === 1;
+            newDevices.charger.currentPower = actions.ev === 1 ? newDevices.charger.basePower : 0;
+        }
+
+        // Determine day/night from timestamp
+        const hour = parseInt(data.timestamp?.split(':')[0] || '12');
+        const isNight = hour < 6 || hour >= 18;
+
+        return {
+            simData: data,
+            history: newHistory,
+            devices: newDevices,
+            isNight,
+            batterySOC: agentData?.soc / 100 || 0.5,
+            gridImport: agentData?.grid * 1000 || 0,
+            totalBill: agentData?.bill || 0,
+            weather: data.env?.weather || 'sunny',
+            n_home: hour >= 17 || hour <= 7 ? 2 : 0,
+        };
+    }),
+
+    currentViewMode: 'ppo',
+    setViewMode: (mode) => {
+        set({ currentViewMode: mode });
+        const { simData } = get();
+        if (simData) {
+            const agentData = simData[mode];
+            const actions = agentData?.actions;
+            const devices = { ...get().devices };
+
+            if (actions) {
+                // Update all room-specific devices when view mode changes
+                devices.ac_living.isOn = actions.ac_living === 1;
+                devices.ac_living.currentPower = actions.ac_living === 1 ? devices.ac_living.basePower : 0;
+                devices.ac_master.isOn = actions.ac_master === 1;
+                devices.ac_master.currentPower = actions.ac_master === 1 ? devices.ac_master.basePower : 0;
+                devices.ac_bed2.isOn = actions.ac_bed2 === 1;
+                devices.ac_bed2.currentPower = actions.ac_bed2 === 1 ? devices.ac_bed2.basePower : 0;
+
+                devices.light_living.isOn = actions.light_living === 1;
+                devices.light_living.currentPower = actions.light_living === 1 ? devices.light_living.basePower : 0;
+                devices.light_master.isOn = actions.light_master === 1;
+                devices.light_master.currentPower = actions.light_master === 1 ? devices.light_master.basePower : 0;
+                devices.light_bed2.isOn = actions.light_bed2 === 1;
+                devices.light_bed2.currentPower = actions.light_bed2 === 1 ? devices.light_bed2.basePower : 0;
+                devices.light_kitchen.isOn = actions.light_kitchen === 1;
+                devices.light_kitchen.currentPower = actions.light_kitchen === 1 ? devices.light_kitchen.basePower : 0;
+                devices.light_toilet.isOn = actions.light_toilet === 1;
+                devices.light_toilet.currentPower = actions.light_toilet === 1 ? devices.light_toilet.basePower : 0;
+
+                devices.washer.isOn = actions.wm === 1;
+                devices.washer.currentPower = actions.wm === 1 ? devices.washer.basePower : 0;
+                devices.charger.isOn = actions.ev === 1;
+                devices.charger.currentPower = actions.ev === 1 ? devices.charger.basePower : 0;
             }
-        } catch (e) {
-            console.error("Simulation API Error", e);
-            set({ isLoading: false, decisionLog: ["Simulation Failed. Check Backend."] });
+
+            set({
+                devices,
+                batterySOC: agentData?.soc / 100 || 0.5,
+                gridImport: agentData?.grid * 1000 || 0,
+                totalBill: agentData?.bill || 0,
+            });
         }
     },
 
-    setSimStep: (step) => {
-        const { simData, currentModelView } = get();
-        if (!simData) return;
+    devices: INITIAL_DEVICES,
 
-        // Clamp step
-        const safeStep = Math.max(0, Math.min(step, simData[currentModelView].length - 1));
-        const dataPoint = simData[currentModelView][safeStep];
-
-        // Update Environment State
-        set((state) => {
-            const newDevices = { ...state.devices };
-
-            // Map API device states to local devices
-            if (dataPoint.devices) {
-                newDevices.washer.isOn = dataPoint.devices.washer;
-                newDevices.washer.currentPower = dataPoint.devices.washer ? newDevices.washer.basePower : 0;
-
-                newDevices.ac_living.isOn = dataPoint.devices.ac_living;
-                newDevices.ac_living.currentPower = dataPoint.devices.ac_living ? newDevices.ac_living.basePower : 0;
-
-                newDevices.ac_master.isOn = dataPoint.devices.ac_master;
-                newDevices.ac_master.currentPower = dataPoint.devices.ac_master ? newDevices.ac_master.basePower : 0;
-
-                newDevices.charger.isOn = dataPoint.devices.charger;
-                newDevices.charger.currentPower = dataPoint.devices.charger ? newDevices.charger.basePower : 0;
-
-                newDevices.tv.isOn = dataPoint.devices.tv;
-                newDevices.tv.currentPower = dataPoint.devices.tv ? newDevices.tv.basePower : 0;
-
-                newDevices.lamp.isOn = dataPoint.devices.lights;
-                newDevices.lamp.currentPower = dataPoint.devices.lights ? newDevices.lamp.basePower : 0;
-
-                // Keep fridge always on/visual consistency
-                newDevices.fridge.isOn = true;
-                newDevices.fridge.currentPower = 200;
-            }
-
-            return {
-                devices: newDevices,
-                simStep: safeStep,
-                batterySOC: dataPoint.soc,
-                gridImport: Math.round(dataPoint.load - dataPoint.pv), // Simplified visual
-                totalBill: dataPoint.total_bill,
-                n_home: dataPoint.n_home,
-                weather: dataPoint.weather,
-                isNight: safeStep < 6 || safeStep > 18, // Auto day/night based on hour
-            };
-        });
-    },
-
-    setModelView: (model) => {
-        set({ currentModelView: model });
-        get().setSimStep(get().simStep); // Refresh view with new model data
-    },
-
-    toggleDevice: (id) =>
-        set((state) => {
-            if (state.simData) return state; // Locked in Sim Mode
-            const device = state.devices[id];
-            return {
-                devices: { ...state.devices, [id]: { ...device, isOn: !device.isOn } }
-            };
-        }),
-
+    isNight: false,
     toggleNight: () => set((state) => ({ isNight: !state.isNight })),
 
-    tick: () => {
-        // Optional: Auto-play logic could go here if we want a Play button later
-    }
+    batterySOC: 0.5,
+    gridImport: 0,
+    totalBill: 0,
+    weather: 'sunny',
+    n_home: 2,
 }));
