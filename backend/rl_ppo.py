@@ -3,6 +3,7 @@ Train PPO on SmartHomeEnv
 - No tqdm
 - Progress printed as percentage
 - Episode reward logging
+- Device-Specific Action Space (7 dimensions)
 """
 
 import os
@@ -87,35 +88,37 @@ def make_env():
     def _init():
         T = 24
 
-        price = 0.1 + 0.2 * np.random.rand(T)
-        pv = np.clip(
-            1.4 * np.sin(np.linspace(0, np.pi, T))
-            + 0.2 * np.random.randn(T),
-            0,
-            None,
-        )
+        # Let environment generate its own price and PV profiles
+        price = None
+        pv = None
 
         config = {
-            "critical": [0.3] * T,
-            "adjustable": [
-                {"P_min": 0.1, "P_max": 1.5, "P_com": 1.2, "alpha": 0.06},
-                {"P_min": 0.0, "P_max": 1.2, "P_com": 1.0, "alpha": 0.12},
-            ],
-            "shiftable_su": [
-                {"rate": 0.5, "L": 2, "t_s": 6, "t_f": 20},
-                {"rate": 0.6, "L": 1, "t_s": 8, "t_f": 22},
-            ],
-            "shiftable_si": [
-                {"rate": 1.0, "E": 4.0, "t_s": 0, "t_f": 23}
-            ],
-            "beta": 0.5,
-            "battery": {
-                "capacity_kwh": 6.0,
-                "soc0": 0.5,
-                "soc_min": 0.1,
-                "soc_max": 0.9,
+            'time_step_hours': 1.0,
+            'sim_start': '2025-01-01',
+            'sim_steps': T,
+            'sim_freq': '1h',
+            'battery': {
+                'capacity_kwh': 10.0,
+                'soc_init': 0.5,
+                'soc_min': 0.1,
+                'soc_max': 0.9,
+                'p_charge_max_kw': 3.0,
+                'p_discharge_max_kw': 3.0,
+                'eta_ch': 0.95,
+                'eta_dis': 0.95
             },
-            "reward_mode": "advanced",
+            'pv_config': {
+                'latitude': 10.762622,
+                'longitude': 106.660172,
+                'tz': 'Asia/Ho_Chi_Minh',
+                'surface_tilt': 10.0,
+                'surface_azimuth': 180.0,
+                'module_parameters': {'pdc0': 3.0}
+            },
+            'behavior': {
+                'residents': [],
+                'must_run_base': 0.15
+            }
         }
 
         env = SmartHomeEnv(price, pv, config)
@@ -134,10 +137,10 @@ def main():
     episodes_to_train = 10000
     total_timesteps = T * episodes_to_train
 
-    print(
-        f"\nTraining PPO for {episodes_to_train} episodes "
-        f"({total_timesteps} timesteps)\n"
-    )
+    print(f"\nTraining PPO with Device-Specific Control")
+    print(f"Action Space: 7 dimensions (Battery + 3 ACs + EV + WM + DW)")
+    print(f"Training for {episodes_to_train} episodes "
+          f"({total_timesteps} timesteps)\n")
 
     vec_env = DummyVecEnv([make_env()])
 
@@ -168,7 +171,7 @@ def main():
         plt.plot(reward_logger.episode_rewards)
         plt.xlabel("Episode")
         plt.ylabel("Episode Reward")
-        plt.title("PPO Reward per Episode")
+        plt.title("PPO (Device-Specific) Reward per Episode")
         plt.grid(True)
         plt.tight_layout()
         plt.show()

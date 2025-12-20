@@ -278,6 +278,12 @@ export default function ComparisonDashboard() {
                             hybridOn={simData.hybrid.actions.wm === 1}
                         />
                         <DeviceBadge
+                            icon="🍽️"
+                            name="Dishwasher"
+                            ppoOn={simData.ppo.actions.dw === 1}
+                            hybridOn={simData.hybrid.actions.dw === 1}
+                        />
+                        <DeviceBadge
                             icon="🔌"
                             name="EV Charger"
                             ppoOn={simData.ppo.actions.ev === 1}

@@ -23,6 +23,7 @@ interface AgentAction {
     light_toilet: number;
     // Other devices
     wm: number;
+    dw: number;  // Dishwasher
     ev: number;
     battery: 'charge' | 'discharge' | 'idle';
 }
@@ -97,6 +98,7 @@ const INITIAL_DEVICES: Record<string, Device> = {
     tv: { id: 'tv', name: 'Smart TV', room: 'living', type: 'tv', isOn: false, basePower: 150, currentPower: 0 },
     fridge: { id: 'fridge', name: 'Smart Fridge', room: 'kitchen', type: 'fridge', isOn: true, basePower: 200, currentPower: 200 },
     washer: { id: 'washer', name: 'Washing Machine', room: 'utility', type: 'washer', isOn: false, basePower: 500, currentPower: 0 },
+    dishwasher: { id: 'dishwasher', name: 'Dishwasher', room: 'kitchen', type: 'washer', isOn: false, basePower: 1200, currentPower: 0 },
     charger: { id: 'charger', name: 'EV Charger', room: 'garage', type: 'charger', isOn: false, basePower: 7000, currentPower: 0 },
 };
 
@@ -145,6 +147,9 @@ export const useStore = create<AppState>((set, get) => ({
             // Update other devices
             newDevices.washer.isOn = actions.wm === 1;
             newDevices.washer.currentPower = actions.wm === 1 ? newDevices.washer.basePower : 0;
+
+            newDevices.dishwasher.isOn = actions.dw === 1;
+            newDevices.dishwasher.currentPower = actions.dw === 1 ? newDevices.dishwasher.basePower : 0;
 
             newDevices.charger.isOn = actions.ev === 1;
             newDevices.charger.currentPower = actions.ev === 1 ? newDevices.charger.basePower : 0;
@@ -198,6 +203,8 @@ export const useStore = create<AppState>((set, get) => ({
 
                 devices.washer.isOn = actions.wm === 1;
                 devices.washer.currentPower = actions.wm === 1 ? devices.washer.basePower : 0;
+                devices.dishwasher.isOn = actions.dw === 1;
+                devices.dishwasher.currentPower = actions.dw === 1 ? devices.dishwasher.basePower : 0;
                 devices.charger.isOn = actions.ev === 1;
                 devices.charger.currentPower = actions.ev === 1 ? devices.charger.basePower : 0;
             }

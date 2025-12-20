@@ -6,6 +6,12 @@ from typing import Dict, List, Optional, Tuple
 import gymnasium as gym
 from gymnasium import spaces
 
+# Import device configuration
+from device_config import (
+    DEVICE_CONFIG, ACTION_INDICES, ROOM_OCCUPANCY_HOURS,
+    THERMAL_CONSTANTS, EV_CONFIG
+)
+
 try:
     import pvlib
     from pvlib.location import Location
@@ -139,9 +145,8 @@ class AdvancedHumanBehaviorGenerator:
             # Occupancy Logic
             n_home = 2 if (17 <= hour <= 23 or 0 <= hour <= 7) else 0
             
-            # Base Load Logic
-            base = self.must_run_base + 0.15 * n_home
-            if 18 <= hour <= 22: base += 0.4
+            # Base Load Logic (Fridge only now, devices are handled separately)
+            base = DEVICE_CONFIG['fixed']['fridge']['power']
             
             # Temperature Logic (Simulated)
             temp_base = {'sunny': 32, 'mild': 28, 'cloudy': 26, 'rainy': 24, 'stormy': 22}
@@ -154,6 +159,21 @@ class AdvancedHumanBehaviorGenerator:
                 'temp_out': temp_out
             })
         return schedules
+
+
+# --- HELPER FUNCTIONS ---
+def is_room_occupied(room: str, hour: int) -> bool:
+    """Check if a room is occupied at the given hour based on ROOM_OCCUPANCY_HOURS"""
+    ranges = ROOM_OCCUPANCY_HOURS.get(room, [])
+    for (start, end) in ranges:
+        # Handle overnight ranges (e.g., 22-24, 0-6)
+        if start <= end:
+            if start <= hour < end:
+                return True
+        else:  # Overnight range like (22, 6) would be split
+            if hour >= start or hour < end:
+                return True
+    return False
 
 
 # --- MAIN ENV CLASS ---
@@ -195,25 +215,14 @@ class SmartHomeEnv(gym.Env):
         self.weather_states = ["sunny", "mild", "cloudy", "rainy", "stormy"]
         self.weather_factors = {"sunny":1.0, "mild":0.8, "cloudy":0.5, "rainy":0.3, "stormy":0.1}
         
-        # Devices
-        self.su_devs = config.get('shiftable_su', [])
-        self.si_devs = config.get('shiftable_si', [])
-        self.ad_devs = config.get('adjustable', [])
+        # --- NEW: Action Space (7 dimensions) ---
+        # [battery, ac_living, ac_master, ac_bed2, ev, wm, dw]
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float32)
         
-        self.N_su = len(self.su_devs)
-        self.N_si = len(self.si_devs)
-        self.N_ad = len(self.ad_devs)
-        
-        # Spaces
-        total_action = self.N_su + self.N_si + self.N_ad
-        if total_action > 0:
-            self.action_space = spaces.MultiBinary(total_action)
-        else:
-            self.action_space = spaces.Discrete(1)
-            
-        # Obs: [SOC, PV, MustRun, FuturePV, Sin, Cos, Occupancy, TempOut, SU_Prog, SI_Prog]
-        # Tăng lên 10 chiều để hỗ trợ tracking
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32)
+        # --- NEW: Observation Space (13 dimensions) ---
+        # [SOC, PV, MustRun, FuturePV, Sin, Cos, Occupancy, TempOut, 
+        #  TempLiving, TempMaster, TempBed2, WM_remaining, EV_soc]
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
         
         # Behavior
         self.behavior_gen = AdvancedHumanBehaviorGenerator(config.get('behavior', {}))
@@ -264,11 +273,35 @@ class SmartHomeEnv(gym.Env):
         # Reset States
         self.t = 0
         self.soc = float(self.battery.get('soc_init', 0.5))
-        self.su_status = np.zeros(self.N_su)
-        self.si_status = np.zeros(self.N_si)
         self.cumulative_import_kwh = 0.0
         self.cumulative_export_kwh = 0.0
         self.total_cost = 0.0
+        
+        # --- NEW: Room temperature states ---
+        self.room_temps = {
+            'living': THERMAL_CONSTANTS['comfort_temp'],
+            'master': THERMAL_CONSTANTS['comfort_temp'],
+            'bed2': THERMAL_CONSTANTS['comfort_temp']
+        }
+        
+        # --- NEW: Shiftable device states ---
+        # Washing Machine: randomly needs to run today
+        self.wm_remaining = np.random.choice([0, 2], p=[0.3, 0.7])  # 70% chance needs washing
+        self.wm_deadline = 22  # Must complete by 10 PM
+        
+        # Dishwasher: runs after dinner
+        self.dw_remaining = np.random.choice([0, 1], p=[0.4, 0.6])  # 60% chance
+        self.dw_deadline = 23
+        
+        # EV: needs to be charged by morning
+        self.ev_soc = np.random.uniform(0.2, 0.5)  # Start with 20-50% charge
+        self.ev_deadline = EV_CONFIG['deadline_hour']
+        
+        # Store current outdoor temperature
+        self.temp_out = self.load_schedules[0]['temp_out']
+        
+        # Device states for info output
+        self.device_states = {}
 
     def _get_obs(self):
         idx = min(self.t, self.sim_steps - 1)
@@ -276,7 +309,7 @@ class SmartHomeEnv(gym.Env):
         
         must_run = float(self.load_schedules[idx]['must_run'])
         n_home = self.load_schedules[idx]['n_home']
-        temp_out = self.load_schedules[idx]['temp_out']
+        self.temp_out = self.load_schedules[idx]['temp_out']
         
         pv_now = float(self.pv_profile[idx]) if self.pv_profile is not None else 0.0
         
@@ -284,110 +317,242 @@ class SmartHomeEnv(gym.Env):
         end_idx = min(self.sim_steps, idx + 1 + horizon)
         future_pv = float(np.sum(self.pv_profile[idx+1 : end_idx])) if idx+1 < self.sim_steps else 0.0
         
-        # Progress Tracking (Normalize 0-1)
-        if self.N_su > 0:
-            su_prog = np.mean([self.su_status[i]/max(1, self.su_devs[i]['L']) for i in range(self.N_su)])
-        else: su_prog = 1.0
-            
-        if self.N_si > 0:
-            si_prog = np.mean([self.si_status[i]/max(1, self.si_devs[i]['E']) for i in range(self.N_si)])
-        else: si_prog = 1.0
-            
         hour_sin = math.sin(2 * math.pi * hour / 24)
         hour_cos = math.cos(2 * math.pi * hour / 24)
         
-        return np.array([self.soc, pv_now, must_run, future_pv, 
-                         hour_sin, hour_cos, n_home, temp_out, 
-                         su_prog, si_prog], dtype=np.float32)
+        # NEW: Extended observation with room temperatures and device states
+        return np.array([
+            self.soc,                           # 0: Battery SOC
+            pv_now,                             # 1: Current PV generation
+            must_run,                           # 2: Fixed load (fridge)
+            future_pv,                          # 3: Future PV prediction
+            hour_sin,                           # 4: Hour encoding (sin)
+            hour_cos,                           # 5: Hour encoding (cos)
+            n_home,                             # 6: Occupancy count
+            self.temp_out,                      # 7: Outdoor temperature
+            self.room_temps['living'],          # 8: Living room temperature
+            self.room_temps['master'],          # 9: Master bedroom temperature
+            self.room_temps['bed2'],            # 10: Bedroom 2 temperature
+            self.wm_remaining,                  # 11: WM hours remaining
+            self.ev_soc                         # 12: EV SOC
+        ], dtype=np.float32)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         self._reset_internal()
         return self._get_obs(), {}
 
+    def _update_room_temp(self, room: str, ac_power_normalized: float) -> float:
+        """
+        Update room temperature based on AC power and outdoor temperature.
+        Formula: T_next = T_curr + k1*(T_out - T_curr) - k2*Power_AC
+        """
+        k1 = THERMAL_CONSTANTS['k1']
+        k2 = THERMAL_CONSTANTS['k2']
+        current_temp = self.room_temps[room]
+        
+        # Temperature tends towards outdoor temp, AC cools it down
+        delta_temp = k1 * (self.temp_out - current_temp) - k2 * ac_power_normalized
+        new_temp = current_temp + delta_temp
+        
+        # Clamp to reasonable range
+        return clamp(new_temp, 18.0, 38.0)
+    
+    def _calculate_comfort_penalty(self, room: str, has_occupant: bool) -> float:
+        """Calculate comfort penalty based on room temperature deviation"""
+        if not has_occupant:
+            return 0.0
+        
+        target = THERMAL_CONSTANTS['comfort_temp']
+        tolerance = THERMAL_CONSTANTS['comfort_tolerance']
+        current = self.room_temps[room]
+        
+        deviation = abs(current - target)
+        if deviation <= tolerance:
+            return 0.0
+        else:
+            # Exponential penalty for temperature deviation beyond tolerance
+            return (deviation - tolerance) ** 2 * 2.0
+
     def step(self, action):
         idx = self.t
-        must = float(self.load_schedules[idx]['must_run'])
+        hour = int(self.times[idx].hour)
+        
+        must_run = float(self.load_schedules[idx]['must_run'])  # Fridge power
         n_home = self.load_schedules[idx]['n_home']
-        temp_out = self.load_schedules[idx]['temp_out']
+        self.temp_out = self.load_schedules[idx]['temp_out']
         
-        # Ensure action format
-        if np.isscalar(action): action = [action]
-        action = np.array(action, dtype=int).flatten()
+        # Ensure action is numpy array
+        action = np.array(action, dtype=np.float32).flatten()
+        if len(action) != 7:
+            # Fallback: pad or truncate
+            if len(action) > 7:
+                action = action[:7]
+            else:
+                action = np.pad(action, (0, 7 - len(action)))
         
-        # [FIX]: Kiểm tra độ dài action đúng với khai báo Space
-        expected_len = self.N_su + self.N_si + self.N_ad
-        if action.size != expected_len:
-            # Fallback tự động điều chỉnh nếu lỗi
-            if action.size > expected_len: action = action[:expected_len]
-            else: action = np.pad(action, (0, expected_len - action.size))
+        # --- 1. UNPACK ACTIONS ---
+        act_battery = action[ACTION_INDICES['battery']]  # -1 to 1
         
-        p_dev_load = 0.0
+        # Normalize AC actions from [-1, 1] to [0, 1]
+        act_ac_living = (action[ACTION_INDICES['ac_living']] + 1) / 2
+        act_ac_master = (action[ACTION_INDICES['ac_master']] + 1) / 2
+        act_ac_bed2 = (action[ACTION_INDICES['ac_bed2']] + 1) / 2
+        
+        # EV: normalize to [0, 1]
+        act_ev = (action[ACTION_INDICES['ev']] + 1) / 2
+        
+        # Shiftable: threshold at 0
+        act_wm = 1 if action[ACTION_INDICES['wm']] > 0 else 0
+        act_dw = 1 if action[ACTION_INDICES['dw']] > 0 else 0
+        
+        # --- 2. PROCESS DEVICES ---
+        total_load = 0.0
         comfort_penalty = 0.0
+        self.device_states = {}
         
-        # 1. SU Devices
-        for i in range(self.N_su):
-            if i < len(action) and action[i] == 1:
-                if self.su_status[i] < self.su_devs[i]['L']:
-                    p_dev_load += self.su_devs[i]['rate']
-                    self.su_status[i] += 1
-                else:
-                    comfort_penalty += 0.5 # Run thừa
-                    
-        # 2. SI Devices
-        offset_si = self.N_su
-        for i in range(self.N_si):
-            if action[offset_si + i] == 1:
-                if self.si_status[i] < self.si_devs[i]['E']:
-                    p_dev_load += self.si_devs[i]['rate']
-                    self.si_status[i] += self.si_devs[i]['rate'] * self.time_step_h
-                else:
-                    comfort_penalty += 2.0
-                    
-        # 3. AC (Adjustable)
-        offset_ad = self.N_su + self.N_si
-        for i in range(self.N_ad):
-            act_idx = offset_ad + i
-            if act_idx < len(action):
-                act = action[act_idx]
-                if act == 1:
-                    p_dev_load += self.ad_devs[i]['P_com']
-
-                if n_home > 0:
-                    if temp_out > 28.0 and act == 0:
-                        comfort_penalty += 10.0
-
-        total_load = must + p_dev_load
+        # --- A. AC Processing with Temperature Dynamics ---
+        ac_rooms = [
+            ('living', act_ac_living, 'ac_living'),
+            ('master', act_ac_master, 'ac_master'),
+            ('bed2', act_ac_bed2, 'ac_bed2')
+        ]
         
-        # Battery Logic
+        for room, act_val, device_key in ac_rooms:
+            cfg = DEVICE_CONFIG['adjustable'][device_key]
+            power_kw = act_val * cfg['power_max']
+            
+            # Update room temperature
+            self.room_temps[room] = self._update_room_temp(room, act_val)
+            
+            # Add power consumption
+            total_load += power_kw
+            
+            # Calculate comfort penalty if room is occupied
+            is_occupied = is_room_occupied(room, hour)
+            comfort_penalty += self._calculate_comfort_penalty(room, is_occupied)
+            
+            # Store device state (ON if power > 0.1 kW)
+            self.device_states[device_key] = 1 if power_kw > 0.1 else 0
+        
+        # --- B. Shiftable Devices (WM, DW) with Deadline Logic ---
+        
+        # Washing Machine
+        if self.wm_remaining > 0:
+            if act_wm == 1:
+                total_load += DEVICE_CONFIG['shiftable']['wm']['power']
+                self.wm_remaining -= 1
+                self.device_states['wm'] = 1
+            else:
+                self.device_states['wm'] = 0
+                # Deadline penalty: if approaching deadline without completing
+                hours_to_deadline = self.wm_deadline - hour
+                if hours_to_deadline <= self.wm_remaining and hours_to_deadline > 0:
+                    comfort_penalty += 5.0  # Penalize for risking deadline
+        else:
+            self.device_states['wm'] = 0
+        
+        # Dishwasher
+        if self.dw_remaining > 0:
+            if act_dw == 1:
+                total_load += DEVICE_CONFIG['shiftable']['dw']['power']
+                self.dw_remaining -= 1
+                self.device_states['dw'] = 1
+            else:
+                self.device_states['dw'] = 0
+                hours_to_dw_deadline = self.dw_deadline - hour
+                if hours_to_dw_deadline <= self.dw_remaining and hours_to_dw_deadline > 0:
+                    comfort_penalty += 3.0
+        else:
+            self.device_states['dw'] = 0
+        
+        # --- C. EV Charging ---
+        ev_power = act_ev * DEVICE_CONFIG['shiftable']['ev']['power_max']
+        ev_capacity = DEVICE_CONFIG['shiftable']['ev']['capacity']
+        
+        # Update EV SOC
+        energy_added = ev_power * self.time_step_h  # kWh
+        self.ev_soc = clamp(self.ev_soc + energy_added / ev_capacity, 0.0, 1.0)
+        
+        total_load += ev_power
+        self.device_states['ev'] = round(act_ev, 2)  # Store as continuous value
+        
+        # EV deadline penalty
+        if hour < self.ev_deadline and self.ev_soc < EV_CONFIG['min_target_soc']:
+            hours_to_ev_deadline = self.ev_deadline - hour if hour < self.ev_deadline else 24 - hour + self.ev_deadline
+            energy_needed = (EV_CONFIG['min_target_soc'] - self.ev_soc) * ev_capacity
+            max_possible = DEVICE_CONFIG['shiftable']['ev']['power_max'] * hours_to_ev_deadline
+            if energy_needed > max_possible:
+                comfort_penalty += 10.0  # Severe penalty for missing EV deadline
+        
+        # --- D. Fixed Devices (Lights) - Rule-based on Occupancy ---
+        for light_key, cfg in DEVICE_CONFIG['fixed'].items():
+            if cfg.get('always_on'):  # Fridge
+                # Already included in must_run
+                continue
+            
+            room = cfg['room']
+            is_occupied = is_room_occupied(room, hour)
+            
+            # Add random factor for toilet (50% chance when occupied hours)
+            if room == 'toilet' and is_occupied:
+                is_occupied = np.random.random() < 0.3  # 30% chance during active hours
+            
+            if is_occupied:
+                total_load += cfg['power']
+                self.device_states[light_key] = 1
+            else:
+                self.device_states[light_key] = 0
+        
+        # Add fixed load (fridge)
+        total_load += must_run
+        
+        # --- 3. BATTERY & GRID LOGIC ---
         pv_gen = float(self.pv_profile[idx])
         surplus = pv_gen - total_load
-
+        
+        # Battery action interpretation:
+        # act_battery > 0: Prefer charging
+        # act_battery < 0: Prefer discharging
+        p_charge_max = float(self.battery.get('p_charge_max_kw', 3.0))
+        p_discharge_max = float(self.battery.get('p_discharge_max_kw', 3.0))
+        
         if surplus >= 0:
-            p_ch = min(surplus, float(self.battery.get('p_charge_max_kw', 3.0)))
+            # More PV than load - charge battery with surplus
+            p_ch = min(surplus, p_charge_max)
             eta = float(self.battery.get('eta_ch', 0.95))
-            self.soc = clamp(self.soc + (p_ch * eta)/self.C_bat, self.battery['soc_min'], self.battery['soc_max'])
-            grid = -(surplus - p_ch)
+            self.soc = clamp(self.soc + (p_ch * eta) / self.C_bat, 
+                           self.battery['soc_min'], self.battery['soc_max'])
+            grid = -(surplus - p_ch)  # Export excess
+            battery_state = 'charge' if p_ch > 0.01 else 'idle'
         else:
             deficit = -surplus
-            p_dis_max = float(self.battery.get('p_discharge_max_kw', 3.0))
             
-            # Check available energy in battery
+            # Check if we should discharge (act_battery < 0 or auto-discharge)
+            if act_battery < 0:
+                # Agent wants to discharge
+                discharge_intent = abs(act_battery)  # 0 to 1
+            else:
+                # Default: discharge to cover deficit
+                discharge_intent = 1.0
+            
+            # Available energy in battery
             kwh_avail = (self.soc - self.battery['soc_min']) * self.C_bat
-            # Power available to discharge
             p_dis_avail = (kwh_avail * float(self.battery.get('eta_dis', 0.95))) / self.time_step_h
             
-            p_dis = min(deficit, p_dis_max, p_dis_avail)
+            p_dis = min(deficit, p_discharge_max, p_dis_avail) * discharge_intent
             
             eta = float(self.battery.get('eta_dis', 0.95))
-            self.soc = clamp(self.soc - (p_dis/eta)/self.C_bat, self.battery['soc_min'], self.battery['soc_max'])
-            grid = deficit - p_dis
+            self.soc = clamp(self.soc - (p_dis / eta) / self.C_bat, 
+                           self.battery['soc_min'], self.battery['soc_max'])
+            grid = deficit - p_dis  # Import from grid
+            battery_state = 'discharge' if p_dis > 0.01 else 'idle'
+        
+        self.device_states['battery'] = battery_state
 
         current_weather = self.weather_series[idx] if idx < len(self.weather_series) else "unknown"
-        current_weather = self.weather_series[idx] if idx < len(self.weather_series) else "unknown"
         
-        # --- BILLING LOGIC (TIERED) ---
-        # grid > 0: Import | grid < 0: Export
+        # --- 4. BILLING LOGIC (TIERED) ---
         grid_kwh = grid * self.time_step_h
         
         if grid_kwh > 0:
@@ -396,30 +561,64 @@ class SmartHomeEnv(gym.Env):
             self.cumulative_export_kwh += abs(grid_kwh)
             
         import_bill = calculate_vietnam_tiered_bill(self.cumulative_import_kwh)
-        export_revenue = self.cumulative_export_kwh * 2000.0 # Feed-in Tariff
+        export_revenue = self.cumulative_export_kwh * 2000.0  # Feed-in Tariff
         
         self.total_cost = import_bill - export_revenue
-        cost = 0 # Step cost is implicit in total
+        cost = 0  # Step cost is implicit in total
         
+        # --- 5. REWARD CALCULATION ---
         reward = -cost / 1000.0 - comfort_penalty
-        if self.soc <= self.battery['soc_min'] + 0.01: reward -= 0.5
+        
+        # Penalty for low battery
+        if self.soc <= self.battery['soc_min'] + 0.01:
+            reward -= 0.5
         
         self.t += 1
         done = self.t >= self.sim_steps
         
+        # End-of-day penalties for incomplete tasks
         if done:
-            # Completion Penalty
-            for i in range(self.N_su):
-                if self.su_status[i] < self.su_devs[i]['L']: reward -= 20.0
-            for i in range(self.N_si):
-                if self.si_status[i] < self.si_devs[i]['E'] * 0.9: reward -= 20.0
-                
+            # Washing machine didn't complete
+            if self.wm_remaining > 0:
+                reward -= 20.0
+            # Dishwasher didn't complete
+            if self.dw_remaining > 0:
+                reward -= 15.0
+            # EV not charged enough
+            if self.ev_soc < EV_CONFIG['min_target_soc']:
+                reward -= 25.0
+        
+        # --- 6. BUILD INFO DICT ---
         info = {
-            'cost': cost, 'total_cost': int(self.total_cost), 'soc': self.soc, 'temp': temp_out, 
-            'n_home': n_home, 'pv': pv_gen, 'load': total_load,
+            'cost': cost,
+            'total_cost': int(self.total_cost),
+            'soc': self.soc,
+            'temp': self.temp_out,
+            'n_home': n_home,
+            'pv': pv_gen,
+            'load': total_load,
             'weather': current_weather,
             'cumulative_import': self.cumulative_import_kwh,
-            'cumulative_export': self.cumulative_export_kwh
+            'cumulative_export': self.cumulative_export_kwh,
+            'hour': hour,
+            # Device-specific states
+            'ac_living': self.device_states.get('ac_living', 0),
+            'ac_master': self.device_states.get('ac_master', 0),
+            'ac_bed2': self.device_states.get('ac_bed2', 0),
+            'light_living': self.device_states.get('light_living', 0),
+            'light_master': self.device_states.get('light_master', 0),
+            'light_bed2': self.device_states.get('light_bed2', 0),
+            'light_kitchen': self.device_states.get('light_kitchen', 0),
+            'light_toilet': self.device_states.get('light_toilet', 0),
+            'wm': self.device_states.get('wm', 0),
+            'dw': self.device_states.get('dw', 0),
+            'ev': self.device_states.get('ev', 0),
+            'battery': self.device_states.get('battery', 'idle'),
+            # Internal states for hybrid agent
+            'wm_remaining': self.wm_remaining,
+            'dw_remaining': self.dw_remaining,
+            'ev_soc': self.ev_soc,
+            'room_temps': self.room_temps.copy()
         }
         
-        return self._get_obs() if not done else np.zeros(10, dtype=np.float32), float(reward), done, False, info
+        return self._get_obs() if not done else np.zeros(13, dtype=np.float32), float(reward), done, False, info
