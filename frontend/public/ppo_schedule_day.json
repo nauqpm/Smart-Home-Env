@@ -1,0 +1,314 @@
+[
+  {
+    "t": 0,
+    "action": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 1,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 2,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 3,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 4,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.13600777559118776,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 5,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.1967322699167961,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 6,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.2795675753317802,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 7,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.3814959016157615,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 8,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.5466437916949547,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 9,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.7238449627646265,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 10,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.9,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 11,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.9,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 12,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.9,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 13,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.9,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 14,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.9,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 15,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.9,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 16,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "battery_soc": 0.9,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 17,
+    "action": [
+      1.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.37368421052631584,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 18,
+    "action": [
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 19,
+    "action": [
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 20,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 21,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 22,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  },
+  {
+    "t": 23,
+    "action": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "battery_soc": 0.1,
+    "grid_import": 0,
+    "loads": {}
+  }
+]
