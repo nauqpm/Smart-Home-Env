@@ -34,6 +34,10 @@ interface AgentData {
     grid: number;
     actions: AgentAction;
     comfort: number;
+    // Room temperatures
+    temp_living?: number;
+    temp_master?: number;
+    temp_bed2?: number;
 }
 
 export interface SimulationPacket {

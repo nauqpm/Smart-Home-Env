@@ -1,21 +1,36 @@
 """
 WebSocket Server for Smart Home Simulation
-Streams real-time PPO vs Hybrid agent comparison data to frontend
+Uses REAL trained PPO and Hybrid models from .zip files
+Streams real-time comparison data to frontend
 """
 import asyncio
-import math
-import random
+import os
 import logging
+import numpy as np
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
+# Import environment and config
+from smart_home_env import SmartHomeEnv
+from device_config import DEVICE_CONFIG, ACTION_INDICES, ROOM_OCCUPANCY_HOURS
+from rl_ppo_hybrid_new import HybridAgentWrapper
+
+# Try to import stable_baselines3
+try:
+    from stable_baselines3 import PPO
+    HAS_SB3 = True
+except ImportError:
+    HAS_SB3 = False
+    print("WARNING: stable_baselines3 not installed. Using fallback mode.")
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('WebSocketServer')
 
-app = FastAPI(title="Smart Home HEMS WebSocket Server")
+app = FastAPI(title="Smart Home HEMS WebSocket Server - Real Models")
 
 # CORS for HTTP endpoints
 app.add_middleware(
@@ -26,178 +41,331 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Model paths
+PPO_MODEL_PATH = "ppo_smart_home.zip"
+HYBRID_MODEL_PATH = "ppo_hybrid_smart_home.zip"
 
-class LightweightSimulation:
+
+class RealModelSimulation:
     """
-    Lightweight simulation that doesn't depend on SmartHomeEnv.
-    This avoids numpy/torch dependency issues while providing realistic data.
+    Simulation using REAL trained PPO and Hybrid models.
+    Falls back to heuristic mode if models are not available.
     """
+    
     def __init__(self):
-        self.step = 0
-        self.ppo_soc = 50.0
-        self.hybrid_soc = 50.0
-        self.ppo_bill = 0
-        self.hybrid_bill = 0
+        self.step_count = 0
+        self.use_real_models = False
+        self.ppo_model = None
+        self.hybrid_model = None
+        self.hybrid_wrapper = None
         
-    def update(self):
-        self.step += 1
-        hour = self.step % 24
+        # Environment config
+        self.config = {
+            'time_step_hours': 1.0,
+            'sim_start': '2025-01-01',
+            'sim_steps': 24,
+            'sim_freq': '1h',
+            'battery': {
+                'capacity_kwh': 10.0,
+                'soc_init': 0.5,
+                'soc_min': 0.1,
+                'soc_max': 0.9,
+                'p_charge_max_kw': 3.0,
+                'p_discharge_max_kw': 3.0,
+                'eta_ch': 0.95,
+                'eta_dis': 0.95
+            },
+            'pv_config': {
+                'latitude': 10.762622,
+                'longitude': 106.660172,
+                'tz': 'Asia/Ho_Chi_Minh',
+                'surface_tilt': 10.0,
+                'surface_azimuth': 180.0,
+                'module_parameters': {'pdc0': 3.0}
+            },
+            'behavior': {
+                'residents': [],
+                'must_run_base': 0.15
+            }
+        }
         
-        # PV generation curve (peak at noon)
-        if 6 <= hour <= 18:
-            pv = 3.0 * math.sin(math.pi * (hour - 6) / 12)
-        else:
-            pv = 0.0
+        # Initialize environments
+        self._init_environments()
+        
+        # Try to load models
+        self._load_models()
+    
+    def _init_environments(self):
+        """Initialize dual environments for PPO and Hybrid"""
+        seed = 42
+        np.random.seed(seed)
+        
+        self.env_ppo = SmartHomeEnv(None, None, self.config)
+        self.env_hybrid = SmartHomeEnv(None, None, self.config)
+        
+        self.obs_ppo, _ = self.env_ppo.reset(seed=seed)
+        self.obs_hybrid, _ = self.env_hybrid.reset(seed=seed)
+        
+        self.info_ppo = {}
+        self.info_hybrid = {}
+        self.done = False
+        
+        logger.info("✅ Dual environments initialized")
+    
+    def _load_models(self):
+        """Load trained PPO models from .zip files"""
+        if not HAS_SB3:
+            logger.warning("⚠️ stable_baselines3 not available. Using heuristic mode.")
+            return
+        
+        try:
+            # Check if model files exist
+            if os.path.exists(PPO_MODEL_PATH):
+                self.ppo_model = PPO.load(PPO_MODEL_PATH)
+                logger.info(f"✅ Loaded PPO model from {PPO_MODEL_PATH}")
+            else:
+                logger.warning(f"⚠️ PPO model not found: {PPO_MODEL_PATH}")
             
-        # Weather selection
-        weather_probs = ['sunny', 'sunny', 'mild', 'cloudy', 'rainy']
-        weather = random.choice(weather_probs)
+            if os.path.exists(HYBRID_MODEL_PATH):
+                hybrid_base_model = PPO.load(HYBRID_MODEL_PATH)
+                self.hybrid_wrapper = HybridAgentWrapper(hybrid_base_model)  # Only 1 arg!
+                logger.info(f"✅ Loaded Hybrid model from {HYBRID_MODEL_PATH}")
+            else:
+                logger.warning(f"⚠️ Hybrid model not found: {HYBRID_MODEL_PATH}")
+            
+            # Enable real model mode if at least one model loaded
+            if self.ppo_model is not None or self.hybrid_wrapper is not None:
+                self.use_real_models = True
+                logger.info("🚀 REAL MODEL MODE ENABLED")
+            else:
+                logger.warning("⚠️ No models loaded. Using heuristic fallback.")
+                
+        except Exception as e:
+            logger.error(f"❌ Error loading models: {e}")
+            logger.warning("⚠️ Falling back to heuristic mode")
+    
+    def _get_heuristic_action(self, hour, temp_out, n_home, agent_type='ppo'):
+        """Fallback heuristic action when models are not available"""
+        action = np.zeros(7, dtype=np.float32)
         
-        # Apply weather factor to PV
-        weather_factors = {'sunny': 1.0, 'mild': 0.8, 'cloudy': 0.5, 'rainy': 0.3, 'stormy': 0.1}
-        pv *= weather_factors.get(weather, 0.8)
-        
-        # Temperature curve
-        temp = 28 + 6 * math.sin(math.pi * (hour - 9) / 12) + random.uniform(-1, 1)
-        
-        # Vietnam tiered pricing simulation
-        if hour in [17, 18, 19, 20, 21]:  # Peak hours
-            price_tier = 5
-        elif hour in [6, 7, 8, 9, 10]:  # Morning peak
-            price_tier = 4
-        elif hour in [22, 23, 0, 1, 2, 3, 4, 5]:  # Night
-            price_tier = 1
+        # Battery logic
+        if 6 <= hour <= 16:
+            action[ACTION_INDICES['battery']] = 0.5
         else:
-            price_tier = 3
+            action[ACTION_INDICES['battery']] = -0.5
         
-        # --- ROOM-SPECIFIC DEVICE CONTROL ---
+        # AC logic
+        if n_home > 0 and temp_out > 28:
+            action[ACTION_INDICES['ac_living']] = 0.6
+            action[ACTION_INDICES['ac_master']] = 0.4 if hour >= 21 else -0.5
+            action[ACTION_INDICES['ac_bed2']] = 0.3 if hour >= 21 else -0.5
+        else:
+            action[ACTION_INDICES['ac_living']] = -0.8
+            action[ACTION_INDICES['ac_master']] = -0.8
+            action[ACTION_INDICES['ac_bed2']] = -0.8
         
-        # PPO Agent: Less optimized behavior (random-ish)
-        # ACs - Living room always on when hot, others random
-        ppo_ac_living = 1 if temp > 28 else 0
-        ppo_ac_master = 1 if temp > 29 and random.random() > 0.4 else 0
-        ppo_ac_bed2 = 1 if temp > 30 and random.random() > 0.5 else 0
+        # EV charging
+        if 22 <= hour or hour < 6:
+            action[ACTION_INDICES['ev']] = 0.8
+        else:
+            action[ACTION_INDICES['ev']] = -0.5
         
-        # Lights - On based on time (evening/night)
-        is_dark = hour >= 18 or hour < 6
-        ppo_light_living = 1 if is_dark else 0
-        ppo_light_master = 1 if hour >= 21 or hour < 7 else 0
-        ppo_light_bed2 = 1 if hour >= 20 or hour < 8 else 0
-        ppo_light_kitchen = 1 if hour in [6, 7, 12, 18, 19] else 0
-        ppo_light_toilet = 1 if random.random() > 0.7 else 0
+        # WM/DW
+        if agent_type == 'ppo':
+            action[ACTION_INDICES['wm']] = 0.5 if 18 <= hour <= 20 else -0.5
+            action[ACTION_INDICES['dw']] = 0.5 if 19 <= hour <= 21 else -0.5
+        else:
+            # Hybrid is smarter
+            action[ACTION_INDICES['wm']] = 0.5 if 14 <= hour <= 16 else -0.5
+            action[ACTION_INDICES['dw']] = 0.5 if 15 <= hour <= 17 else -0.5
         
-        ppo_wm = 1 if hour in [10, 14, 16] else 0
-        ppo_ev = 1 if hour in [22, 23, 0] else 0
+        return action
+    
+    def _get_env_state(self, env):
+        """Extract environment state for Hybrid rules"""
+        hour = self.step_count % 24
+        return {
+            'hour': hour,
+            'soc': env.soc,
+            'ev_soc': getattr(env, 'ev_soc', 0.5),
+            'wm_remaining': getattr(env, 'wm_remaining', 0),
+            'wm_deadline': getattr(env, 'wm_deadline', 22),
+            'dw_remaining': getattr(env, 'dw_remaining', 0),
+            'dw_deadline': getattr(env, 'dw_deadline', 23),
+            'n_home': env.load_schedules[min(self.step_count, 23)]['n_home'] if hasattr(env, 'load_schedules') else 0,
+            'price_tier': self._get_price_tier(env.cumulative_import_kwh),
+            'temp_out': getattr(env, 'temp_out', 30)
+        }
+    
+    def _get_price_tier(self, cumulative_kwh):
+        if cumulative_kwh <= 50: return 1
+        elif cumulative_kwh <= 100: return 2
+        elif cumulative_kwh <= 200: return 3
+        elif cumulative_kwh <= 300: return 4
+        elif cumulative_kwh <= 400: return 5
+        else: return 6
+    
+    def update(self):
+        """Run one simulation step"""
+        if self.done:
+            self.reset()
+            return self.get_data_packet()
         
-        # Hybrid Agent: Smarter behavior (considers price + comfort)
-        # ACs - Only run when needed AND price is reasonable
-        hybrid_ac_living = 1 if temp > 29 and price_tier <= 4 else 0
-        hybrid_ac_master = 1 if temp > 30 and price_tier <= 3 and hour >= 20 else 0
-        hybrid_ac_bed2 = 1 if temp > 31 and price_tier <= 2 else 0
+        hour = self.step_count % 24
         
-        # Lights - Smart scheduling to save energy
-        hybrid_light_living = 1 if is_dark and hour < 23 else 0
-        hybrid_light_master = 1 if hour >= 21 and hour < 23 else 0
-        hybrid_light_bed2 = 1 if hour >= 20 and hour < 22 else 0
-        hybrid_light_kitchen = 1 if hour in [6, 7, 18, 19] else 0  # Less than PPO
-        hybrid_light_toilet = 1 if random.random() > 0.8 else 0
+        # Get environment states
+        ppo_state = self._get_env_state(self.env_ppo)
+        hybrid_state = self._get_env_state(self.env_hybrid)
         
-        hybrid_wm = 1 if hour in [11, 15] and price_tier <= 3 else 0
-        hybrid_ev = 1 if hour in [1, 2, 3, 4] else 0  # Charge at lowest price
+        # --- GET PPO ACTION ---
+        if self.use_real_models and self.ppo_model is not None:
+            # Use REAL trained PPO model
+            action_ppo, _ = self.ppo_model.predict(self.obs_ppo, deterministic=True)
+            action_ppo = np.array(action_ppo, dtype=np.float32).flatten()
+            logger.debug(f"[PPO] Real model action: {action_ppo}")
+        else:
+            # Fallback to heuristic
+            action_ppo = self._get_heuristic_action(
+                hour, ppo_state['temp_out'], ppo_state['n_home'], 'ppo'
+            )
         
-        # Calculate power consumption (sum of all room devices)
-        ppo_ac_power = 1.5 * (ppo_ac_living + ppo_ac_master + ppo_ac_bed2)
-        ppo_light_power = 0.015 * (ppo_light_living + ppo_light_master + ppo_light_bed2 + ppo_light_kitchen + ppo_light_toilet)
-        ppo_load = ppo_ac_power + ppo_light_power + 0.5 * ppo_wm + 3.3 * ppo_ev + 0.3  # Base load
+        # --- GET HYBRID ACTION ---
+        if self.use_real_models and self.hybrid_wrapper is not None:
+            # Use REAL trained Hybrid model with rule overrides
+            action_hybrid, _ = self.hybrid_wrapper.predict(
+                self.obs_hybrid, 
+                env_state=hybrid_state, 
+                deterministic=True
+            )
+            action_hybrid = np.array(action_hybrid, dtype=np.float32).flatten()
+            logger.debug(f"[Hybrid] Real model action: {action_hybrid}")
+        else:
+            # Fallback to heuristic
+            action_hybrid = self._get_heuristic_action(
+                hour, hybrid_state['temp_out'], hybrid_state['n_home'], 'hybrid'
+            )
         
-        hybrid_ac_power = 1.5 * (hybrid_ac_living + hybrid_ac_master + hybrid_ac_bed2)
-        hybrid_light_power = 0.015 * (hybrid_light_living + hybrid_light_master + hybrid_light_bed2 + hybrid_light_kitchen + hybrid_light_toilet)
-        hybrid_load = hybrid_ac_power + hybrid_light_power + 0.5 * hybrid_wm + 3.3 * hybrid_ev + 0.3
+        # Step environments
+        self.obs_ppo, _, done_ppo, _, self.info_ppo = self.env_ppo.step(action_ppo)
+        self.obs_hybrid, _, done_hybrid, _, self.info_hybrid = self.env_hybrid.step(action_hybrid)
         
-        # Net power (positive = need grid, negative = export)
-        ppo_net = ppo_load - pv
-        hybrid_net = hybrid_load - pv
+        self.done = done_ppo or done_hybrid
+        self.step_count += 1
         
-        # Update SOC based on net power
-        delta_ppo = -ppo_net * 0.8  # SOC change
-        delta_hybrid = -hybrid_net * 0.8
+        return self.get_data_packet()
+    
+    def get_data_packet(self):
+        """Build JSON data packet for frontend"""
+        hour = self.step_count % 24
         
-        self.ppo_soc = max(10, min(90, self.ppo_soc + delta_ppo))
-        self.hybrid_soc = max(10, min(90, self.hybrid_soc + delta_hybrid))
+        # Environment data (shared)
+        env_data = {
+            "weather": str(self.info_ppo.get('weather', 'sunny')),
+            "temp": float(round(float(self.info_ppo.get('temp', 30.0)), 1)),
+            "pv": float(round(float(self.info_ppo.get('pv', 0.0)), 2)),
+            "price_tier": int(self._get_price_tier(self.env_ppo.cumulative_import_kwh))
+        }
         
-        # Calculate bill increment
-        tier_prices = [0, 1984, 2050, 2380, 2998, 3350, 3460]
-        cost_per_kwh = tier_prices[price_tier]
+        # Get room temperatures from environments
+        ppo_room_temps = self.info_ppo.get('room_temps', {})
+        hybrid_room_temps = self.info_hybrid.get('room_temps', {})
         
-        # Only charge for grid import (positive net)
-        if ppo_net > 0:
-            self.ppo_bill += int(ppo_net * cost_per_kwh / 24)
-        if hybrid_net > 0:
-            self.hybrid_bill += int(hybrid_net * cost_per_kwh / 24)
+        # Also try to get from env directly if not in info
+        if not ppo_room_temps and hasattr(self.env_ppo, 'room_temps'):
+            ppo_room_temps = self.env_ppo.room_temps
+        if not hybrid_room_temps and hasattr(self.env_hybrid, 'room_temps'):
+            hybrid_room_temps = self.env_hybrid.room_temps
         
-        # Determine battery mode
-        ppo_battery = 'charge' if delta_ppo > 0.3 else ('discharge' if delta_ppo < -0.3 else 'idle')
-        hybrid_battery = 'charge' if delta_hybrid > 0.3 else ('discharge' if delta_hybrid < -0.3 else 'idle')
+        # PPO agent data
+        ppo_actions = self._parse_device_states(self.info_ppo)
+        ppo_comfort = self._calculate_comfort_score(ppo_room_temps)
+        ppo_data = {
+            "bill": int(self.env_ppo.total_cost),
+            "soc": float(round(float(self.env_ppo.soc) * 100, 1)),
+            "grid": float(round(float(self.env_ppo.cumulative_import_kwh - self.env_ppo.cumulative_export_kwh), 2)),
+            "actions": ppo_actions,
+            "comfort": ppo_comfort,
+            "temp_living": float(round(float(ppo_room_temps.get('living', 25.0)), 1)),
+            "temp_master": float(round(float(ppo_room_temps.get('master', 25.0)), 1)),
+            "temp_bed2": float(round(float(ppo_room_temps.get('bed2', 25.0)), 1))
+        }
+        
+        # Hybrid agent data
+        hybrid_actions = self._parse_device_states(self.info_hybrid)
+        hybrid_comfort = self._calculate_comfort_score(hybrid_room_temps)
+        hybrid_data = {
+            "bill": int(self.env_hybrid.total_cost),
+            "soc": float(round(float(self.env_hybrid.soc) * 100, 1)),
+            "grid": float(round(float(self.env_hybrid.cumulative_import_kwh - self.env_hybrid.cumulative_export_kwh), 2)),
+            "actions": hybrid_actions,
+            "comfort": hybrid_comfort,
+            "temp_living": float(round(float(hybrid_room_temps.get('living', 25.0)), 1)),
+            "temp_master": float(round(float(hybrid_room_temps.get('master', 25.0)), 1)),
+            "temp_bed2": float(round(float(hybrid_room_temps.get('bed2', 25.0)), 1))
+        }
         
         return {
             "timestamp": f"{hour:02d}:00",
-            "env": {
-                "weather": weather,
-                "temp": round(temp, 1),
-                "pv": round(pv, 2),
-                "price_tier": price_tier
-            },
-            "ppo": {
-                "bill": self.ppo_bill,
-                "soc": round(self.ppo_soc, 1),
-                "grid": round(max(0, ppo_net), 2),
-                "actions": {
-                    "ac_living": ppo_ac_living,
-                    "ac_master": ppo_ac_master,
-                    "ac_bed2": ppo_ac_bed2,
-                    "light_living": ppo_light_living,
-                    "light_master": ppo_light_master,
-                    "light_bed2": ppo_light_bed2,
-                    "light_kitchen": ppo_light_kitchen,
-                    "light_toilet": ppo_light_toilet,
-                    "wm": ppo_wm,
-                    "ev": ppo_ev,
-                    "battery": ppo_battery
-                },
-                "comfort": 0.0
-            },
-            "hybrid": {
-                "bill": self.hybrid_bill,
-                "soc": round(self.hybrid_soc, 1),
-                "grid": round(max(0, hybrid_net), 2),
-                "actions": {
-                    "ac_living": hybrid_ac_living,
-                    "ac_master": hybrid_ac_master,
-                    "ac_bed2": hybrid_ac_bed2,
-                    "light_living": hybrid_light_living,
-                    "light_master": hybrid_light_master,
-                    "light_bed2": hybrid_light_bed2,
-                    "light_kitchen": hybrid_light_kitchen,
-                    "light_toilet": hybrid_light_toilet,
-                    "wm": hybrid_wm,
-                    "ev": hybrid_ev,
-                    "battery": hybrid_battery
-                },
-                "comfort": 0.0
-            }
+            "env": env_data,
+            "ppo": ppo_data,
+            "hybrid": hybrid_data,
+            "model_mode": "real" if self.use_real_models else "heuristic"
+        }
+    
+    def _calculate_comfort_score(self, room_temps):
+        """Calculate comfort score based on room temperatures (0-100)"""
+        if not room_temps:
+            return 100.0
+        
+        target_temp = 25.0  # Ideal temperature
+        total_deviation = 0.0
+        
+        for room, temp in room_temps.items():
+            deviation = abs(float(temp) - target_temp)
+            total_deviation += deviation
+        
+        # Average deviation across rooms
+        avg_deviation = total_deviation / max(len(room_temps), 1)
+        
+        # Score: 100 - (deviation * 10), clamped to 0-100
+        score = max(0, min(100, 100 - avg_deviation * 10))
+        return float(round(score, 1))
+    
+    def _parse_device_states(self, info):
+        """Parse device states from environment info"""
+        return {
+            "ac_living": int(info.get('ac_living', 0)),
+            "ac_master": int(info.get('ac_master', 0)),
+            "ac_bed2": int(info.get('ac_bed2', 0)),
+            "light_living": int(info.get('light_living', 0)),
+            "light_master": int(info.get('light_master', 0)),
+            "light_bed2": int(info.get('light_bed2', 0)),
+            "light_kitchen": int(info.get('light_kitchen', 0)),
+            "light_toilet": int(info.get('light_toilet', 0)),
+            "wm": int(info.get('wm', 0)),
+            "dw": int(info.get('dw', 0)),
+            "ev": float(info.get('ev', 0)),
+            "battery": str(info.get('battery', 'idle'))
         }
     
     def reset(self):
         """Reset simulation for new day"""
-        self.step = 0
-        self.ppo_soc = 50.0
-        self.hybrid_soc = 50.0
-        self.ppo_bill = 0
-        self.hybrid_bill = 0
+        seed = np.random.randint(0, 10000)
+        np.random.seed(seed)
+        
+        self.obs_ppo, _ = self.env_ppo.reset(seed=seed)
+        self.obs_hybrid, _ = self.env_hybrid.reset(seed=seed)
+        
+        self.step_count = 0
+        self.done = False
+        self.info_ppo = {}
+        self.info_hybrid = {}
+        
+        logger.info(f"🔄 Simulation reset (seed={seed})")
 
 
 # Global simulation instance
-sim = LightweightSimulation()
+sim = RealModelSimulation()
 
 # Track connected clients
 connected_clients = []
@@ -207,7 +375,8 @@ connected_clients = []
 async def root():
     return {
         "status": "running",
-        "message": "Smart Home HEMS WebSocket Server",
+        "message": "Smart Home HEMS WebSocket Server - Real Models",
+        "model_mode": "real" if sim.use_real_models else "heuristic",
         "websocket_endpoint": "/ws",
         "http_endpoint": "/data",
         "connected_clients": len(connected_clients)
@@ -216,7 +385,12 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "model_mode": "real" if sim.use_real_models else "heuristic",
+        "ppo_loaded": sim.ppo_model is not None,
+        "hybrid_loaded": sim.hybrid_wrapper is not None
+    }
 
 
 @app.get("/data")
@@ -232,6 +406,18 @@ async def reset_sim():
     return {"status": "reset"}
 
 
+@app.get("/reload-models")
+async def reload_models():
+    """Reload models from .zip files"""
+    sim._load_models()
+    return {
+        "status": "reloaded",
+        "model_mode": "real" if sim.use_real_models else "heuristic",
+        "ppo_loaded": sim.ppo_model is not None,
+        "hybrid_loaded": sim.hybrid_wrapper is not None
+    }
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time streaming"""
@@ -240,6 +426,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connected_clients.append(websocket)
     logger.info(f"✅ Client connected. Total: {len(connected_clients)}")
+    logger.info(f"📊 Model mode: {'REAL' if sim.use_real_models else 'HEURISTIC'}")
     
     try:
         while True:
@@ -264,13 +451,18 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("=" * 50)
-    logger.info("🚀 Smart Home HEMS WebSocket Server")
-    logger.info("=" * 50)
-    logger.info("📡 WebSocket: ws://localhost:8001/ws")
-    logger.info("🌐 HTTP Poll: http://localhost:8001/data")
-    logger.info("=" * 50)
+    logger.info("=" * 60)
+    logger.info("🚀 Smart Home HEMS WebSocket Server - REAL MODELS")
+    logger.info("=" * 60)
+    logger.info(f"📊 Model Mode: {'REAL AI' if sim.use_real_models else 'HEURISTIC FALLBACK'}")
+    logger.info(f"   PPO Model: {'✅ Loaded' if sim.ppo_model else '❌ Not found'}")
+    logger.info(f"   Hybrid Model: {'✅ Loaded' if sim.hybrid_wrapper else '❌ Not found'}")
+    logger.info("=" * 60)
+    logger.info("📡 WebSocket: ws://localhost:8000/ws")
+    logger.info("🌐 HTTP Poll: http://localhost:8000/data")
+    logger.info("🔄 Reload Models: http://localhost:8000/reload-models")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

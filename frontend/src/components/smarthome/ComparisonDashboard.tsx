@@ -4,30 +4,32 @@ import {
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
-// --- Styles ---
+// --- Styles (Compact) ---
 const panelStyle: React.CSSProperties = {
     background: 'rgba(15, 23, 42, 0.95)',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 10,
+    padding: 10,
     color: '#e2e8f0',
     fontFamily: 'Inter, sans-serif',
+    maxHeight: '80vh',
+    overflowY: 'auto',
 };
 
 const headerStyle: React.CSSProperties = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
-    padding: '12px 16px',
+    marginBottom: 10,
+    padding: '8px 12px',
     background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(14, 165, 233, 0.2))',
-    borderRadius: 8,
+    borderRadius: 6,
 };
 
 const chartContainerStyle: React.CSSProperties = {
     background: 'rgba(30, 41, 59, 0.6)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 8,
 };
 
 const buttonStyle = (active: boolean): React.CSSProperties => ({
@@ -58,6 +60,22 @@ const tierColors: Record<number, string> = {
     4: '#f97316',
     5: '#ef4444',
     6: '#dc2626', // Red - expensive
+};
+
+// Helper: Get color based on comfort score (0-100)
+const getComfortColor = (score: number | undefined): string => {
+    if (score === undefined) return '#64748b';
+    if (score >= 80) return '#22c55e';  // Green - comfortable
+    if (score >= 60) return '#eab308';  // Yellow - acceptable
+    return '#ef4444';                    // Red - uncomfortable
+};
+
+// Helper: Get color based on room temperature
+const getTempColor = (temp: number | undefined): string => {
+    if (temp === undefined) return '#64748b';
+    if (temp >= 24 && temp <= 27) return '#22c55e';  // Green - optimal
+    if (temp >= 22 && temp <= 28) return '#eab308';  // Yellow - acceptable
+    return '#ef4444';                                 // Red - too hot/cold
 };
 
 // --- Main Component ---
@@ -136,15 +154,28 @@ export default function ComparisonDashboard() {
                     🧠 Hybrid Agent
                 </button>
 
-                {/* Quick Stats */}
+                {/* Quick Stats with Comfort */}
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
                     <div style={{ textAlign: 'center' }}>
                         <div style={{ fontSize: 11, color: '#64748b' }}>PPO Bill</div>
                         <div style={{ fontWeight: 700, color: '#f472b6' }}>{(simData.ppo.bill / 1000).toFixed(1)}K</div>
                     </div>
                     <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>PPO Comfort</div>
+                        <div style={{ fontWeight: 700, color: getComfortColor(simData.ppo.comfort) }}>
+                            {simData.ppo.comfort?.toFixed(0) ?? '--'}/100
+                        </div>
+                    </div>
+                    <div style={{ width: 1, height: 30, background: '#334155' }} />
+                    <div style={{ textAlign: 'center' }}>
                         <div style={{ fontSize: 11, color: '#64748b' }}>Hybrid Bill</div>
                         <div style={{ fontWeight: 700, color: '#22d3ee' }}>{(simData.hybrid.bill / 1000).toFixed(1)}K</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>Hybrid Comfort</div>
+                        <div style={{ fontWeight: 700, color: getComfortColor(simData.hybrid.comfort) }}>
+                            {simData.hybrid.comfort?.toFixed(0) ?? '--'}/100
+                        </div>
                     </div>
                     <div style={{
                         padding: '4px 10px',
@@ -166,7 +197,7 @@ export default function ComparisonDashboard() {
                     <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#94a3b8' }}>
                         💰 Total Bill (VND x1000)
                     </div>
-                    <ResponsiveContainer width="100%" height={140}>
+                    <ResponsiveContainer width="100%" height={100}>
                         <LineChart data={chartData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                             <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#64748b' }} />
@@ -187,7 +218,7 @@ export default function ComparisonDashboard() {
                     <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#94a3b8' }}>
                         🔋 Battery SOC (%)
                     </div>
-                    <ResponsiveContainer width="100%" height={140}>
+                    <ResponsiveContainer width="100%" height={100}>
                         <AreaChart data={chartData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                             <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#64748b' }} />
@@ -204,10 +235,10 @@ export default function ComparisonDashboard() {
 
                 {/* Grid Import Chart */}
                 <div style={chartContainerStyle}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#94a3b8' }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6, color: '#94a3b8' }}>
                         ⚡ Grid Import/Export (kWh)
                     </div>
-                    <ResponsiveContainer width="100%" height={140}>
+                    <ResponsiveContainer width="100%" height={100}>
                         <BarChart data={chartData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                             <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#64748b' }} />
@@ -217,9 +248,39 @@ export default function ComparisonDashboard() {
                             />
                             <Bar dataKey="ppo_grid" fill="#f472b6" name="PPO" />
                             <Bar dataKey="hybrid_grid" fill="#22d3ee" name="Hybrid" />
-                            <Legend wrapperStyle={{ fontSize: 11 }} />
+                            <Legend wrapperStyle={{ fontSize: 10 }} />
                         </BarChart>
                     </ResponsiveContainer>
+                </div>
+
+                {/* === THERMAL COMFORT SECTION === */}
+                <div style={{ ...chartContainerStyle, gridColumn: '1 / -1' }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 8, color: '#94a3b8' }}>
+                        🌡️ Thermal Comfort (°C) - PPO vs Hybrid
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                        {/* Living Room */}
+                        <TempCompareCard
+                            room="Living Room"
+                            icon="🛋️"
+                            ppoTemp={simData.ppo.temp_living}
+                            hybridTemp={simData.hybrid.temp_living}
+                        />
+                        {/* Master Bedroom */}
+                        <TempCompareCard
+                            room="Master Bedroom"
+                            icon="🛏️"
+                            ppoTemp={simData.ppo.temp_master}
+                            hybridTemp={simData.hybrid.temp_master}
+                        />
+                        {/* 2nd Bedroom */}
+                        <TempCompareCard
+                            room="2nd Bedroom"
+                            icon="🛌"
+                            ppoTemp={simData.ppo.temp_bed2}
+                            hybridTemp={simData.hybrid.temp_bed2}
+                        />
+                    </div>
                 </div>
 
                 {/* Room Control Panel */}
@@ -269,29 +330,32 @@ export default function ComparisonDashboard() {
                         />
                     </div>
 
-                    {/* Other Devices */}
-                    <div style={{ marginTop: 12, display: 'flex', gap: 16, justifyContent: 'center' }}>
-                        <DeviceBadge
-                            icon="🧺"
-                            name="Washer"
-                            ppoOn={simData.ppo.actions.wm === 1}
-                            hybridOn={simData.hybrid.actions.wm === 1}
-                        />
-                        <DeviceBadge
-                            icon="🍽️"
-                            name="Dishwasher"
-                            ppoOn={simData.ppo.actions.dw === 1}
-                            hybridOn={simData.hybrid.actions.dw === 1}
-                        />
-                        <DeviceBadge
-                            icon="🔌"
-                            name="EV Charger"
-                            ppoOn={simData.ppo.actions.ev === 1}
-                            hybridOn={simData.hybrid.actions.ev === 1}
-                        />
-                        <div style={{ display: 'flex', gap: 8 }}>
+                    {/* Other Devices - Vertical Layout */}
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <DeviceBadgeCompact
+                                icon="🧺"
+                                name="Washer"
+                                ppoOn={simData.ppo.actions.wm === 1}
+                                hybridOn={simData.hybrid.actions.wm === 1}
+                            />
+                            <DeviceBadgeCompact
+                                icon="🍽️"
+                                name="DW"
+                                ppoOn={simData.ppo.actions.dw === 1}
+                                hybridOn={simData.hybrid.actions.dw === 1}
+                            />
+                            <DeviceBadgeCompact
+                                icon="🔌"
+                                name="EV"
+                                ppoOn={simData.ppo.actions.ev === 1}
+                                hybridOn={simData.hybrid.actions.ev === 1}
+                            />
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <span style={{ fontSize: 9, color: '#64748b' }}>Battery:</span>
                             <BatteryBadge status={simData.ppo.actions.battery} />
-                            <span style={{ color: '#64748b', fontSize: 11 }}>vs</span>
+                            <span style={{ color: '#334155', fontSize: 9 }}>|</span>
                             <BatteryBadge status={simData.hybrid.actions.battery} />
                         </div>
                     </div>
@@ -337,6 +401,49 @@ function BatteryBadge({ status }: { status: 'charge' | 'discharge' | 'idle' }) {
             fontSize: 10,
         }}>
             {config.icon} {config.text}
+        </div>
+    );
+}
+
+// Temperature Compare Card - Shows PPO vs Hybrid temps for a room
+function TempCompareCard({ room, icon, ppoTemp, hybridTemp }: {
+    room: string;
+    icon: string;
+    ppoTemp?: number;
+    hybridTemp?: number
+}) {
+    return (
+        <div style={{
+            background: 'rgba(30, 41, 59, 0.8)',
+            borderRadius: 8,
+            padding: 12,
+            textAlign: 'center',
+        }}>
+            <div style={{ fontSize: 24, marginBottom: 4 }}>{icon}</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>{room}</div>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
+                <div>
+                    <div style={{ fontSize: 9, color: '#f472b6', marginBottom: 2 }}>PPO</div>
+                    <div style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: getTempColor(ppoTemp)
+                    }}>
+                        {ppoTemp?.toFixed(1) ?? '--'}°C
+                    </div>
+                </div>
+                <div style={{ width: 1, background: '#334155' }} />
+                <div>
+                    <div style={{ fontSize: 9, color: '#22d3ee', marginBottom: 2 }}>Hybrid</div>
+                    <div style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: getTempColor(hybridTemp)
+                    }}>
+                        {hybridTemp?.toFixed(1) ?? '--'}°C
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }
@@ -417,3 +524,41 @@ function DeviceBadge({ icon, name, ppoOn, hybridOn }: { icon: string; name: stri
         </div>
     );
 }
+
+// Compact Device Badge for smaller layout
+function DeviceBadgeCompact({ icon, name, ppoOn, hybridOn }: { icon: string; name: string; ppoOn: boolean; hybridOn: boolean }) {
+    return (
+        <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            background: 'rgba(30, 41, 59, 0.8)',
+            padding: '4px 8px',
+            borderRadius: 4,
+        }}>
+            <span style={{ fontSize: 12 }}>{icon}</span>
+            <span style={{ fontSize: 9, color: '#94a3b8' }}>{name}</span>
+            <div style={{
+                padding: '1px 4px',
+                borderRadius: 3,
+                background: ppoOn ? 'rgba(244, 114, 182, 0.2)' : 'rgba(51, 65, 85, 0.5)',
+                color: ppoOn ? '#f472b6' : '#64748b',
+                fontSize: 8,
+                fontWeight: 600,
+            }}>
+                {ppoOn ? '✓' : '—'}
+            </div>
+            <div style={{
+                padding: '1px 4px',
+                borderRadius: 3,
+                background: hybridOn ? 'rgba(34, 211, 238, 0.2)' : 'rgba(51, 65, 85, 0.5)',
+                color: hybridOn ? '#22d3ee' : '#64748b',
+                fontSize: 8,
+                fontWeight: 600,
+            }}>
+                {hybridOn ? '✓' : '—'}
+            </div>
+        </div>
+    );
+}
+
