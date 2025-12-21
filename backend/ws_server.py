@@ -267,10 +267,10 @@ async def startup_event():
     logger.info("=" * 50)
     logger.info("🚀 Smart Home HEMS WebSocket Server")
     logger.info("=" * 50)
-    logger.info("📡 WebSocket: ws://localhost:8000/ws")
-    logger.info("🌐 HTTP Poll: http://localhost:8000/data")
+    logger.info("📡 WebSocket: ws://localhost:8001/ws")
+    logger.info("🌐 HTTP Poll: http://localhost:8001/data")
     logger.info("=" * 50)
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

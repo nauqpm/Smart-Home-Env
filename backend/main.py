@@ -7,8 +7,7 @@ from typing import List, Optional, Dict
 import uvicorn
 import os
 from stable_baselines3 import PPO
-from smart_home_env import SmartHomeEnv
-
+from backend.smart_home_env import SmartHomeEnv
 
 app = FastAPI()
 

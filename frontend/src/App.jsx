@@ -4,7 +4,7 @@ import { useStore } from './stores/useStore';
 import './App.css';
 
 // WebSocket URL
-const WS_URL = 'ws://localhost:8000/ws';
+const WS_URL = 'ws://localhost:8001/ws';
 
 function App() {
   const { updateSimData, setIsConnected, isConnected } = useStore();
