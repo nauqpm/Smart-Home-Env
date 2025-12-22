@@ -6,7 +6,7 @@ import ComparisonDashboard from './ComparisonDashboard';
 export default function Overlay() {
     const {
         devices, isNight, batterySOC, gridImport, totalBill, weather, n_home,
-        simData, currentViewMode, setViewMode, toggleNight, isConnected
+        simData, currentViewMode, setViewMode, toggleNight, isConnected, resetSimulation
     } = useStore();
 
     const [activeTab, setActiveTab] = useState<'dashboard' | 'devices'>('dashboard');
@@ -107,6 +107,29 @@ export default function Overlay() {
                             </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {/* New Day Button */}
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        resetSimulation(); // Clear local state
+                                        await fetch('http://localhost:8000/reset');
+                                    } catch (e) {
+                                        console.error('Reset failed:', e);
+                                    }
+                                }}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 4,
+                                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                                    padding: '6px 12px', borderRadius: 6,
+                                    border: 'none', cursor: 'pointer',
+                                    fontSize: 10, fontWeight: 600, color: '#fff',
+                                    boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                                    transition: 'all 0.2s'
+                                }}
+                                title="Bắt đầu ngày mới (random episode)"
+                            >
+                                🔄 Sang Ngày Mới
+                            </button>
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 6,
                                 background: n_home > 0 ? 'rgba(76, 175, 80, 0.2)' : 'rgba(120, 144, 156, 0.2)',

@@ -9,23 +9,27 @@ const WS_URL = 'ws://localhost:8000/ws';
 function App() {
   const { updateSimData, setIsConnected, isConnected } = useStore();
 
-  // WebSocket connection with reconnection logic
+  // WebSocket connection with exponential backoff reconnection
   useEffect(() => {
     let ws = null;
     let reconnectTimeout = null;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 10;
-    const reconnectDelay = 2000;
+    const baseDelay = 2000; // Start with 2 seconds
+    const maxDelay = 30000; // Cap at 30 seconds
 
     const connect = () => {
-      console.log('📡 Connecting to WebSocket...', WS_URL);
+      // Only log detailed info for first few attempts to reduce console spam
+      if (reconnectAttempts < 3) {
+        console.log('📡 Connecting to WebSocket...', WS_URL);
+      }
 
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
         console.log('✅ WebSocket connected');
         setIsConnected(true);
-        reconnectAttempts = 0;
+        reconnectAttempts = 0; // Reset on successful connection
       };
 
       ws.onmessage = (event) => {
@@ -39,21 +43,34 @@ function App() {
       };
 
       ws.onclose = (event) => {
-        console.log('❌ WebSocket closed:', event.code, event.reason);
+        // Only log first close event to reduce spam
+        if (reconnectAttempts === 0) {
+          console.log('❌ WebSocket closed:', event.code, event.reason);
+        }
         setIsConnected(false);
 
-        // Attempt to reconnect
+        // Exponential backoff: delay doubles each attempt, capped at maxDelay
         if (reconnectAttempts < maxReconnectAttempts) {
+          const delay = Math.min(baseDelay * Math.pow(2, reconnectAttempts), maxDelay);
           reconnectAttempts++;
-          console.log(`🔄 Reconnecting in ${reconnectDelay}ms... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-          reconnectTimeout = setTimeout(connect, reconnectDelay);
+
+          if (reconnectAttempts <= 3) {
+            console.log(`🔄 Reconnecting in ${delay / 1000}s... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+          } else if (reconnectAttempts === 4) {
+            console.log(`🔄 Continuing reconnection attempts silently...`);
+          }
+
+          reconnectTimeout = setTimeout(connect, delay);
         } else {
-          console.error('❌ Max reconnection attempts reached');
+          console.error('❌ Max reconnection attempts reached. Please check if backend server is running.');
         }
       };
 
       ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        // Only log first error to reduce spam
+        if (reconnectAttempts === 0) {
+          console.error('WebSocket error:', error);
+        }
       };
     };
 

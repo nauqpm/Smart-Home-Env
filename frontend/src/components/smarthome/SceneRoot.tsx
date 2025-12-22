@@ -68,15 +68,16 @@ export default function SceneRoot() {
         {/* Lighting */}
         <ambientLight intensity={lightSettings.ambient} />
         <hemisphereLight args={['#ffffff', '#dddddd', lightSettings.hemi]} />
-        <SoftShadows size={12} focus={0.5} samples={12} />
+        {/* Reduced samples from 12 to 6 for better performance */}
+        <SoftShadows size={8} focus={0.5} samples={6} />
 
-        {/* Directional sunlight for shadows */}
+        {/* Directional sunlight for shadows - reduced shadow map for performance */}
         <directionalLight
           position={[10, 15, 10]}
           intensity={lightSettings.sun}
           castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
           shadow-camera-far={50}
           shadow-camera-left={-10}
           shadow-camera-right={10}

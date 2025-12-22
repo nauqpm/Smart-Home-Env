@@ -67,6 +67,7 @@ interface AppState {
 
     simData: SimulationPacket | null;
     updateSimData: (data: SimulationPacket) => void;
+    resetSimulation: () => void;
 
     currentViewMode: 'ppo' | 'hybrid';
     setViewMode: (mode: 'ppo' | 'hybrid') => void;
@@ -112,6 +113,14 @@ export const useStore = create<AppState>((set, get) => ({
 
     simData: null,
     history: [],
+
+    resetSimulation: () => set({
+        simData: null,
+        history: [],
+        batterySOC: 0.5,
+        gridImport: 0,
+        totalBill: 0,
+    }),
 
     updateSimData: (data) => set((state) => {
         const newHistory = [...state.history, data].slice(-24);

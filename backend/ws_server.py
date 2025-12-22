@@ -134,6 +134,16 @@ class RealModelSimulation:
                 logger.warning(f"⚠️ Hybrid model not found: {HYBRID_MODEL_PATH}")
             
             # Enable real model mode if at least one model loaded
+            # Check for observation space compatibility
+            if self.ppo_model is not None:
+                expected_shape = self.ppo_model.observation_space.shape
+                actual_shape = self.obs_ppo.shape
+                if expected_shape != actual_shape:
+                    logger.warning(f"⚠️ OBSERVATION MISMATCH! Model expects {expected_shape}, Env provides {actual_shape}")
+                    logger.warning("⚠️ Models were trained with different env version. Using HEURISTIC mode.")
+                    self.use_real_models = False
+                    return
+            
             if self.ppo_model is not None or self.hybrid_wrapper is not None:
                 self.use_real_models = True
                 logger.info("🚀 REAL MODEL MODE ENABLED")
@@ -207,52 +217,59 @@ class RealModelSimulation:
     
     def update(self):
         """Run one simulation step"""
-        if self.done:
-            self.reset()
+        try:
+            if self.done:
+                self.reset()
+                return self.get_data_packet()
+            
+            hour = self.step_count % 24
+            
+            # Get environment states
+            ppo_state = self._get_env_state(self.env_ppo)
+            hybrid_state = self._get_env_state(self.env_hybrid)
+            
+            # --- GET PPO ACTION ---
+            if self.use_real_models and self.ppo_model is not None:
+                # Use REAL trained PPO model
+                action_ppo, _ = self.ppo_model.predict(self.obs_ppo, deterministic=True)
+                action_ppo = np.array(action_ppo, dtype=np.float32).flatten()
+                logger.debug(f"[PPO] Real model action: {action_ppo}")
+            else:
+                # Fallback to heuristic
+                action_ppo = self._get_heuristic_action(
+                    hour, ppo_state['temp_out'], ppo_state['n_home'], 'ppo'
+                )
+            
+            # --- GET HYBRID ACTION ---
+            if self.use_real_models and self.hybrid_wrapper is not None:
+                # Use REAL trained Hybrid model with rule overrides
+                action_hybrid, _ = self.hybrid_wrapper.predict(
+                    self.obs_hybrid, 
+                    env_state=hybrid_state, 
+                    deterministic=True
+                )
+                action_hybrid = np.array(action_hybrid, dtype=np.float32).flatten()
+                logger.debug(f"[Hybrid] Real model action: {action_hybrid}")
+            else:
+                # Fallback to heuristic
+                action_hybrid = self._get_heuristic_action(
+                    hour, hybrid_state['temp_out'], hybrid_state['n_home'], 'hybrid'
+                )
+            
+            # Step environments
+            self.obs_ppo, _, done_ppo, _, self.info_ppo = self.env_ppo.step(action_ppo)
+            self.obs_hybrid, _, done_hybrid, _, self.info_hybrid = self.env_hybrid.step(action_hybrid)
+            
+            self.done = done_ppo or done_hybrid
+            self.step_count += 1
+            
             return self.get_data_packet()
-        
-        hour = self.step_count % 24
-        
-        # Get environment states
-        ppo_state = self._get_env_state(self.env_ppo)
-        hybrid_state = self._get_env_state(self.env_hybrid)
-        
-        # --- GET PPO ACTION ---
-        if self.use_real_models and self.ppo_model is not None:
-            # Use REAL trained PPO model
-            action_ppo, _ = self.ppo_model.predict(self.obs_ppo, deterministic=True)
-            action_ppo = np.array(action_ppo, dtype=np.float32).flatten()
-            logger.debug(f"[PPO] Real model action: {action_ppo}")
-        else:
-            # Fallback to heuristic
-            action_ppo = self._get_heuristic_action(
-                hour, ppo_state['temp_out'], ppo_state['n_home'], 'ppo'
-            )
-        
-        # --- GET HYBRID ACTION ---
-        if self.use_real_models and self.hybrid_wrapper is not None:
-            # Use REAL trained Hybrid model with rule overrides
-            action_hybrid, _ = self.hybrid_wrapper.predict(
-                self.obs_hybrid, 
-                env_state=hybrid_state, 
-                deterministic=True
-            )
-            action_hybrid = np.array(action_hybrid, dtype=np.float32).flatten()
-            logger.debug(f"[Hybrid] Real model action: {action_hybrid}")
-        else:
-            # Fallback to heuristic
-            action_hybrid = self._get_heuristic_action(
-                hour, hybrid_state['temp_out'], hybrid_state['n_home'], 'hybrid'
-            )
-        
-        # Step environments
-        self.obs_ppo, _, done_ppo, _, self.info_ppo = self.env_ppo.step(action_ppo)
-        self.obs_hybrid, _, done_hybrid, _, self.info_hybrid = self.env_hybrid.step(action_hybrid)
-        
-        self.done = done_ppo or done_hybrid
-        self.step_count += 1
-        
-        return self.get_data_packet()
+        except Exception as e:
+            logger.error(f"❌ Error in update(): {e}")
+            import traceback
+            traceback.print_exc()
+            # Return safe fallback data
+            return self.get_data_packet()
     
     def get_data_packet(self):
         """Build JSON data packet for frontend"""
@@ -429,15 +446,20 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info(f"📊 Model mode: {'REAL' if sim.use_real_models else 'HEURISTIC'}")
     
     try:
+        # Send initial data IMMEDIATELY on connection
+        initial_data = sim.get_data_packet()
+        await websocket.send_json(initial_data)
+        logger.info("📤 Sent initial data packet")
+        
         while True:
+            # Wait before next update
+            await asyncio.sleep(1.0)
+            
             # Update and get data
             data = sim.update()
             
             # Send to client
             await websocket.send_json(data)
-            
-            # 1 second interval (1 hour in simulation time)
-            await asyncio.sleep(1.0)
             
     except WebSocketDisconnect:
         logger.info(f"❌ Client disconnected normally")

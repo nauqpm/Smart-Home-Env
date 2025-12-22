@@ -57,6 +57,14 @@ body {
   cursor: grabbing;
 }
 
+/* FPS Stats - position at bottom left */
+#canvas-container>div>canvas {
+  position: fixed !important;
+  left: 10px !important;
+  bottom: 10px !important;
+  top: auto !important;
+}
+
 #ui-panel {
   position: absolute;
   top: 20px;
