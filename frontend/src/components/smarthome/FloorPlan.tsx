@@ -1,8 +1,28 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { makeTileMat, makeWallMat, makeWoodFloorMat } from './materials';
+import { useStore } from '../../stores/useStore';
 
-// ==========================================
+// Helper function to get heatmap color based on energy consumption
+const getHeatmapColor = (energy: number): THREE.Color => {
+    const maxEnergy = 2.0; // kW - max expected per room
+    const ratio = Math.min(energy / maxEnergy, 1);
+
+    // Green (low) -> Yellow (medium) -> Red (high)
+    if (ratio < 0.33) {
+        // Green to Yellow
+        const t = ratio / 0.33;
+        return new THREE.Color().setHSL(0.33 - t * 0.16, 0.8, 0.5);
+    } else if (ratio < 0.66) {
+        // Yellow to Orange
+        const t = (ratio - 0.33) / 0.33;
+        return new THREE.Color().setHSL(0.17 - t * 0.1, 0.9, 0.5);
+    } else {
+        // Orange to Red
+        const t = (ratio - 0.66) / 0.34;
+        return new THREE.Color().setHSL(0.07 - t * 0.07, 1.0, 0.5);
+    }
+};
 // CONSTANTS
 // ==========================================
 const WALL_H = 2.5;   // Wall height (meters)
@@ -153,6 +173,56 @@ function Floor({ def, woodMat, tileMat }: { def: FloorDef; woodMat: THREE.Materi
 }
 
 // ==========================================
+// ROOM HEATMAP OVERLAY COMPONENT
+// Shows energy consumption with colored glow
+// ==========================================
+type RoomOverlayDef = {
+    id: string;
+    roomId: string; // matches roomEnergy keys
+    size: [number, number];
+    pos: [number, number, number];
+};
+
+const ROOM_OVERLAYS: RoomOverlayDef[] = [
+    { id: 'heatmap-living', roomId: 'living', size: [3.5, 3.5], pos: [2, 0.16, 1.5] },
+    { id: 'heatmap-kitchen', roomId: 'kitchen', size: [3.5, 3.5], pos: [2, 0.16, -2] },
+    { id: 'heatmap-master', roomId: 'master', size: [3.5, 2.5], pos: [-2, 0.16, 2.375] },
+    { id: 'heatmap-bed2', roomId: 'bed2', size: [2.2, 3], pos: [-1.25, 0.16, -2.125] },
+    { id: 'heatmap-toilet', roomId: 'toilet', size: [1.3, 3.8], pos: [-3.25, 0.16, -1.0] },
+];
+
+function RoomHeatmapOverlay() {
+    const roomEnergy = useStore((state) => state.roomEnergy);
+
+    return (
+        <group name="room-heatmap">
+            {ROOM_OVERLAYS.map((overlay) => {
+                const energy = roomEnergy[overlay.roomId] || 0;
+                const color = getHeatmapColor(energy);
+                const intensity = Math.min(energy / 1.5, 1) * 0.6 + 0.1; // 0.1 to 0.7
+
+                return (
+                    <mesh
+                        key={overlay.id}
+                        position={overlay.pos}
+                        rotation={[-Math.PI / 2, 0, 0]}
+                    >
+                        <planeGeometry args={overlay.size} />
+                        <meshBasicMaterial
+                            color={color}
+                            transparent
+                            opacity={intensity}
+                            side={THREE.DoubleSide}
+                            blending={THREE.AdditiveBlending}
+                        />
+                    </mesh>
+                );
+            })}
+        </group>
+    );
+}
+
+// ==========================================
 // MAIN FLOORPLAN COMPONENT
 // ==========================================
 export default function FloorPlan() {
@@ -183,6 +253,9 @@ export default function FloorPlan() {
             {WALLS.map((wall) => (
                 <Wall key={wall.id} def={wall} material={wallMat} />
             ))}
+
+            {/* Room Energy Heatmap Overlay - shows consumption levels */}
+            <RoomHeatmapOverlay />
 
             {/* ============================================ */}
             {/* CEILING TRIM - Continuous molding at wall-ceiling junction */}

@@ -6,7 +6,8 @@ import ComparisonDashboard from './ComparisonDashboard';
 export default function Overlay() {
     const {
         devices, isNight, batterySOC, gridImport, totalBill, weather, n_home,
-        simData, currentViewMode, setViewMode, toggleNight, isConnected, resetSimulation
+        simData, currentViewMode, setViewMode, toggleNight, isConnected, resetSimulation,
+        manualOverride, toggleManualMode, toggleDevice
     } = useStore();
 
     const [activeTab, setActiveTab] = useState<'dashboard' | 'devices'>('dashboard');
@@ -214,32 +215,91 @@ export default function Overlay() {
                                 </div>
                             </div>
 
-                            {/* Device List */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
-                                {Object.values(devices).map((device) => (
-                                    <div
-                                        key={device.id}
-                                        style={{
-                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                            background: device.isOn ? 'rgba(0, 229, 255, 0.1)' : 'rgba(255,255,255,0.03)',
-                                            padding: '10px 14px', borderRadius: 8,
-                                            border: device.isOn ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid rgba(255,255,255,0.05)'
-                                        }}
-                                    >
-                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                            <span style={{ fontSize: 12, fontWeight: 500, color: device.isOn ? '#fff' : '#aaa' }}>{device.name}</span>
-                                            <span style={{ fontSize: 10, color: device.isOn ? '#00e5ff' : '#555' }}>
-                                                {device.isOn ? `${device.currentPower} W` : 'Standby'}
-                                            </span>
+                            {/* Device List with Manual Override Controls */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 6, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
+                                {Object.values(devices).map((device) => {
+                                    const isManual = manualOverride[device.id] || false;
+
+                                    return (
+                                        <div
+                                            key={device.id}
+                                            style={{
+                                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                background: isManual
+                                                    ? 'rgba(251, 191, 36, 0.15)'
+                                                    : device.isOn ? 'rgba(0, 229, 255, 0.1)' : 'rgba(255,255,255,0.03)',
+                                                padding: '8px 12px', borderRadius: 8,
+                                                border: isManual
+                                                    ? '1px solid rgba(251, 191, 36, 0.4)'
+                                                    : device.isOn ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid rgba(255,255,255,0.05)'
+                                            }}
+                                        >
+                                            {/* Device Info */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ fontSize: 11, fontWeight: 500, color: device.isOn ? '#fff' : '#aaa' }}>
+                                                        {device.name}
+                                                    </span>
+                                                    <span style={{
+                                                        fontSize: 9,
+                                                        padding: '2px 6px',
+                                                        borderRadius: 4,
+                                                        background: isManual ? 'rgba(251, 191, 36, 0.3)' : 'rgba(34, 211, 238, 0.2)',
+                                                        color: isManual ? '#fbbf24' : '#22d3ee'
+                                                    }}>
+                                                        {isManual ? '🖐️ MANUAL' : '🤖 AUTO'}
+                                                    </span>
+                                                </div>
+                                                <span style={{ fontSize: 9, color: device.isOn ? '#00e5ff' : '#555' }}>
+                                                    {device.isOn ? `${device.currentPower} W` : 'Standby'}
+                                                </span>
+                                            </div>
+
+                                            {/* Control Buttons */}
+                                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                {/* Manual/Auto Toggle */}
+                                                <button
+                                                    onClick={() => toggleManualMode(device.id)}
+                                                    style={{
+                                                        padding: '4px 8px',
+                                                        borderRadius: 4,
+                                                        background: isManual ? '#fbbf24' : '#374151',
+                                                        border: 'none',
+                                                        color: isManual ? '#000' : '#9ca3af',
+                                                        cursor: 'pointer',
+                                                        fontSize: 9,
+                                                        fontWeight: 600,
+                                                        transition: 'all 0.2s'
+                                                    }}
+                                                    title={isManual ? 'Switch to Auto mode' : 'Switch to Manual mode'}
+                                                >
+                                                    {isManual ? 'Manual' : 'Auto'}
+                                                </button>
+
+                                                {/* ON/OFF Button - only enabled in Manual mode */}
+                                                <button
+                                                    onClick={() => toggleDevice(device.id)}
+                                                    disabled={!isManual}
+                                                    style={{
+                                                        padding: '4px 12px',
+                                                        borderRadius: 4,
+                                                        background: device.isOn ? '#22c55e' : '#6b7280',
+                                                        border: 'none',
+                                                        color: '#fff',
+                                                        cursor: isManual ? 'pointer' : 'not-allowed',
+                                                        opacity: isManual ? 1 : 0.4,
+                                                        fontSize: 9,
+                                                        fontWeight: 600,
+                                                        transition: 'all 0.2s'
+                                                    }}
+                                                    title={isManual ? 'Toggle device' : 'Switch to Manual mode first'}
+                                                >
+                                                    {device.isOn ? 'ON' : 'OFF'}
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div style={{
-                                            width: 10, height: 10,
-                                            background: device.isOn ? '#00e5ff' : '#333',
-                                            borderRadius: '50%',
-                                            boxShadow: device.isOn ? '0 0 8px #00e5ff' : 'none'
-                                        }} />
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
 
                             {/* Stats Footer */}

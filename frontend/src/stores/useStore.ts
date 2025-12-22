@@ -78,6 +78,19 @@ interface AppState {
     isNight: boolean;
     toggleNight: () => void;
 
+    // Manual Override System
+    manualOverride: Record<string, boolean>; // deviceId -> isManualMode
+    manualDeviceState: Record<string, boolean>; // deviceId -> isOn (when manual)
+    toggleManualMode: (deviceId: string) => void;
+    toggleDevice: (deviceId: string) => void;
+
+    // Room Energy for 3D Heatmap (kW)
+    roomEnergy: Record<string, number>;
+
+    // WebSocket reference for sending manual commands
+    wsRef: WebSocket | null;
+    setWsRef: (ws: WebSocket | null) => void;
+
     // Legacy compatibility
     batterySOC: number;
     gridImport: number;
@@ -120,7 +133,63 @@ export const useStore = create<AppState>((set, get) => ({
         batterySOC: 0.5,
         gridImport: 0,
         totalBill: 0,
+        roomEnergy: { living: 0, master: 0, bed2: 0, kitchen: 0, toilet: 0 },
     }),
+
+    // Manual Override System
+    manualOverride: {},
+    manualDeviceState: {},
+
+    toggleManualMode: (deviceId) => set((state) => {
+        const newOverride = { ...state.manualOverride };
+        const newManualState = { ...state.manualDeviceState };
+
+        if (newOverride[deviceId]) {
+            // Switching back to Auto
+            delete newOverride[deviceId];
+            delete newManualState[deviceId];
+        } else {
+            // Switching to Manual - keep current state
+            newOverride[deviceId] = true;
+            newManualState[deviceId] = state.devices[deviceId]?.isOn || false;
+        }
+
+        return { manualOverride: newOverride, manualDeviceState: newManualState };
+    }),
+
+    toggleDevice: (deviceId) => set((state) => {
+        if (!state.manualOverride[deviceId]) return {}; // Only work in manual mode
+
+        const newManualState = { ...state.manualDeviceState };
+        newManualState[deviceId] = !newManualState[deviceId];
+
+        const newDevices = { ...state.devices };
+        if (newDevices[deviceId]) {
+            newDevices[deviceId] = {
+                ...newDevices[deviceId],
+                isOn: newManualState[deviceId],
+                currentPower: newManualState[deviceId] ? newDevices[deviceId].basePower : 0
+            };
+        }
+
+        // Send to backend via WebSocket
+        if (state.wsRef && state.wsRef.readyState === WebSocket.OPEN) {
+            state.wsRef.send(JSON.stringify({
+                type: 'manual_control',
+                device: deviceId,
+                state: newManualState[deviceId]
+            }));
+        }
+
+        return { manualDeviceState: newManualState, devices: newDevices };
+    }),
+
+    // Room Energy Tracking
+    roomEnergy: { living: 0, master: 0, bed2: 0, kitchen: 0, toilet: 0 },
+
+    // WebSocket Reference
+    wsRef: null,
+    setWsRef: (ws) => set({ wsRef: ws }),
 
     updateSimData: (data) => set((state) => {
         const newHistory = [...state.history, data].slice(-24);
@@ -128,45 +197,51 @@ export const useStore = create<AppState>((set, get) => ({
         const actions = agentData?.actions;
 
         // Update device states based on room-specific agent actions
+        // BUT respect manual override - don't update devices that are in manual mode
         const newDevices = { ...state.devices };
+        const manualOverride = state.manualOverride;
+        const manualDeviceState = state.manualDeviceState;
+
+        // Helper to update device only if not in manual mode
+        const updateDevice = (deviceId: string, actionValue: number) => {
+            if (manualOverride[deviceId]) {
+                // In manual mode - use manual state
+                newDevices[deviceId].isOn = manualDeviceState[deviceId] || false;
+                newDevices[deviceId].currentPower = manualDeviceState[deviceId] ? newDevices[deviceId].basePower : 0;
+            } else {
+                // In auto mode - use AI decision
+                newDevices[deviceId].isOn = actionValue === 1;
+                newDevices[deviceId].currentPower = actionValue === 1 ? newDevices[deviceId].basePower : 0;
+            }
+        };
 
         if (actions) {
             // Update ACs
-            newDevices.ac_living.isOn = actions.ac_living === 1;
-            newDevices.ac_living.currentPower = actions.ac_living === 1 ? newDevices.ac_living.basePower : 0;
-
-            newDevices.ac_master.isOn = actions.ac_master === 1;
-            newDevices.ac_master.currentPower = actions.ac_master === 1 ? newDevices.ac_master.basePower : 0;
-
-            newDevices.ac_bed2.isOn = actions.ac_bed2 === 1;
-            newDevices.ac_bed2.currentPower = actions.ac_bed2 === 1 ? newDevices.ac_bed2.basePower : 0;
+            updateDevice('ac_living', actions.ac_living);
+            updateDevice('ac_master', actions.ac_master);
+            updateDevice('ac_bed2', actions.ac_bed2);
 
             // Update Lights
-            newDevices.light_living.isOn = actions.light_living === 1;
-            newDevices.light_living.currentPower = actions.light_living === 1 ? newDevices.light_living.basePower : 0;
-
-            newDevices.light_master.isOn = actions.light_master === 1;
-            newDevices.light_master.currentPower = actions.light_master === 1 ? newDevices.light_master.basePower : 0;
-
-            newDevices.light_bed2.isOn = actions.light_bed2 === 1;
-            newDevices.light_bed2.currentPower = actions.light_bed2 === 1 ? newDevices.light_bed2.basePower : 0;
-
-            newDevices.light_kitchen.isOn = actions.light_kitchen === 1;
-            newDevices.light_kitchen.currentPower = actions.light_kitchen === 1 ? newDevices.light_kitchen.basePower : 0;
-
-            newDevices.light_toilet.isOn = actions.light_toilet === 1;
-            newDevices.light_toilet.currentPower = actions.light_toilet === 1 ? newDevices.light_toilet.basePower : 0;
+            updateDevice('light_living', actions.light_living);
+            updateDevice('light_master', actions.light_master);
+            updateDevice('light_bed2', actions.light_bed2);
+            updateDevice('light_kitchen', actions.light_kitchen);
+            updateDevice('light_toilet', actions.light_toilet);
 
             // Update other devices
-            newDevices.washer.isOn = actions.wm === 1;
-            newDevices.washer.currentPower = actions.wm === 1 ? newDevices.washer.basePower : 0;
-
-            newDevices.dishwasher.isOn = actions.dw === 1;
-            newDevices.dishwasher.currentPower = actions.dw === 1 ? newDevices.dishwasher.basePower : 0;
-
-            newDevices.charger.isOn = actions.ev === 1;
-            newDevices.charger.currentPower = actions.ev === 1 ? newDevices.charger.basePower : 0;
+            updateDevice('washer', actions.wm);
+            updateDevice('dishwasher', actions.dw);
+            updateDevice('charger', actions.ev);
         }
+
+        // Calculate Room Energy for 3D Heatmap (in kW)
+        const roomEnergy: Record<string, number> = {
+            living: (newDevices.ac_living.currentPower + newDevices.light_living.currentPower + newDevices.tv.currentPower) / 1000,
+            master: (newDevices.ac_master.currentPower + newDevices.light_master.currentPower) / 1000,
+            bed2: (newDevices.ac_bed2.currentPower + newDevices.light_bed2.currentPower) / 1000,
+            kitchen: (newDevices.light_kitchen.currentPower + newDevices.fridge.currentPower + newDevices.dishwasher.currentPower) / 1000,
+            toilet: newDevices.light_toilet.currentPower / 1000,
+        };
 
         // Determine day/night from timestamp
         const hour = parseInt(data.timestamp?.split(':')[0] || '12');
@@ -177,6 +252,7 @@ export const useStore = create<AppState>((set, get) => ({
             history: newHistory,
             devices: newDevices,
             isNight,
+            roomEnergy,
             batterySOC: agentData?.soc / 100 || 0.5,
             gridImport: agentData?.grid * 1000 || 0,
             totalBill: agentData?.bill || 0,

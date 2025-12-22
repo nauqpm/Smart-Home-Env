@@ -7,7 +7,7 @@ import './App.css';
 const WS_URL = 'ws://localhost:8000/ws';
 
 function App() {
-  const { updateSimData, setIsConnected, isConnected } = useStore();
+  const { updateSimData, setIsConnected, isConnected, setWsRef } = useStore();
 
   // WebSocket connection with exponential backoff reconnection
   useEffect(() => {
@@ -29,6 +29,7 @@ function App() {
       ws.onopen = () => {
         console.log('✅ WebSocket connected');
         setIsConnected(true);
+        setWsRef(ws); // Store WebSocket reference for manual control
         reconnectAttempts = 0; // Reset on successful connection
       };
 
