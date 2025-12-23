@@ -241,11 +241,12 @@ class RealModelSimulation:
                 )
             
             # --- GET HYBRID ACTION ---
+            # NOTE: Rules are now baked into Hybrid model during training
+            # No need for HybridAgentWrapper rules - just use direct predict
             if self.use_real_models and self.hybrid_wrapper is not None:
-                # Use REAL trained Hybrid model with rule overrides
-                action_hybrid, _ = self.hybrid_wrapper.predict(
+                # Use REAL trained Hybrid model (rules already applied during training)
+                action_hybrid, _ = self.hybrid_wrapper.model.predict(
                     self.obs_hybrid, 
-                    env_state=hybrid_state, 
                     deterministic=True
                 )
                 action_hybrid = np.array(action_hybrid, dtype=np.float32).flatten()
