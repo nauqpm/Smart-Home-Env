@@ -45,6 +45,34 @@ app.add_middleware(
 PPO_MODEL_PATH = "ppo_smart_home.zip"
 HYBRID_MODEL_PATH = "ppo_hybrid_smart_home.zip"
 
+# Demo Scenarios for presentation mode
+DEMO_SCENARIOS = {
+    "ideal": {
+        "name": "Ideal Day",
+        "description": "Sunny bell-curve PV, normal pricing",
+        "pv_profile": [0, 0, 0, 0, 0, 0, 0.2, 0.8, 1.5, 2.5, 3.2, 3.8, 4.0, 3.8, 3.0, 2.0, 1.0, 0.3, 0, 0, 0, 0, 0, 0],
+        "temp_profile": [24, 24, 23, 23, 23, 24, 25, 26, 27, 28, 29, 30, 31, 31, 30, 29, 28, 27, 26, 26, 25, 25, 24, 24],
+        "price_tier": [1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 4, 5, 5, 4, 3, 2, 1, 1],
+        "weather": "sunny"
+    },
+    "erratic": {
+        "name": "Erratic Day",
+        "description": "Intermittent clouds, PV drops at 10h and 14h",
+        "pv_profile": [0, 0, 0, 0, 0, 0, 0.1, 0.5, 1.8, 2.2, 0.2, 0.3, 2.5, 1.0, 0.1, 0.0, 0.0, 0.0, 0, 0, 0, 0, 0, 0],
+        "temp_profile": [25, 25, 25, 24, 24, 25, 26, 28, 30, 32, 31, 30, 29, 27, 26, 25, 25, 24, 24, 24, 23, 23, 23, 23],
+        "price_tier": [1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 4, 5, 5, 4, 3, 2, 1, 1],
+        "weather": "cloudy"
+    },
+    "heatwave": {
+        "name": "Heatwave",
+        "description": "Extreme heat (41°C peak), high PV, tier 6 pricing",
+        "pv_profile": [0, 0, 0, 0, 0, 0.5, 1.2, 2.5, 3.5, 4.2, 4.5, 4.5, 4.5, 4.2, 3.8, 3.0, 2.0, 1.0, 0.2, 0, 0, 0, 0, 0],
+        "temp_profile": [28, 28, 27, 27, 27, 28, 30, 33, 36, 38, 40, 41, 41, 40, 38, 36, 34, 32, 31, 30, 30, 29, 29, 28],
+        "price_tier": [1, 1, 1, 1, 1, 2, 3, 4, 4, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 5, 4, 3, 2, 1],
+        "weather": "sunny"
+    }
+}
+
 
 class RealModelSimulation:
     """
@@ -58,6 +86,10 @@ class RealModelSimulation:
         self.ppo_model = None
         self.hybrid_model = None
         self.hybrid_wrapper = None
+        
+        # Demo mode state (OFF by default - uses normal simulation)
+        self.is_demo_mode = False
+        self.current_scenario = "ideal"
         
         # Environment config
         self.config = {
@@ -224,6 +256,11 @@ class RealModelSimulation:
             
             hour = self.step_count % 24
             
+            # Inject demo scenario data if demo mode is active
+            # This happens BEFORE AI prediction so models see the demo data
+            if self.is_demo_mode:
+                self._inject_demo_data()
+            
             # Get environment states
             ppo_state = self._get_env_state(self.env_ppo)
             hybrid_state = self._get_env_state(self.env_hybrid)
@@ -277,12 +314,26 @@ class RealModelSimulation:
         hour = self.step_count % 24
         
         # Environment data (shared)
-        env_data = {
-            "weather": str(self.info_ppo.get('weather', 'sunny')),
-            "temp": float(round(float(self.info_ppo.get('temp', 30.0)), 1)),
-            "pv": float(round(float(self.info_ppo.get('pv', 0.0)), 2)),
-            "price_tier": int(self._get_price_tier(self.env_ppo.cumulative_import_kwh))
-        }
+        # When demo mode is ON, use scenario data instead of environment data
+        if self.is_demo_mode:
+            scenario = DEMO_SCENARIOS[self.current_scenario]
+            env_data = {
+                "weather": scenario["weather"],
+                "temp": float(scenario["temp_profile"][hour]),
+                "pv": float(scenario["pv_profile"][hour]),
+                "price_tier": int(scenario["price_tier"][hour]),
+                "scenario_name": scenario["name"],
+                "demo_mode": True
+            }
+        else:
+            # Original logic - use actual environment data
+            env_data = {
+                "weather": str(self.info_ppo.get('weather', 'sunny')),
+                "temp": float(round(float(self.info_ppo.get('temp', 30.0)), 1)),
+                "pv": float(round(float(self.info_ppo.get('pv', 0.0)), 2)),
+                "price_tier": int(self._get_price_tier(self.env_ppo.cumulative_import_kwh)),
+                "demo_mode": False
+            }
         
         # Get room temperatures from environments
         ppo_room_temps = self.info_ppo.get('room_temps', {})
@@ -366,6 +417,36 @@ class RealModelSimulation:
             "battery": str(info.get('battery', 'idle'))
         }
     
+    def set_demo_mode(self, enabled: bool, scenario: str = None):
+        """Toggle demo mode and optionally change scenario"""
+        self.is_demo_mode = enabled
+        if scenario and scenario in DEMO_SCENARIOS:
+            self.current_scenario = scenario
+        if enabled:
+            self.reset()  # Reset to hour 0 when enabling demo
+            logger.info(f"🎬 Demo mode ENABLED - Scenario: {DEMO_SCENARIOS[self.current_scenario]['name']}")
+        else:
+            logger.info("🔄 Demo mode DISABLED - Returning to normal simulation")
+    
+    def _inject_demo_data(self):
+        """Inject demo scenario data into environments when demo mode is ON"""
+        if not self.is_demo_mode:
+            return
+        
+        scenario = DEMO_SCENARIOS[self.current_scenario]
+        hour = self.step_count % 24
+        
+        demo_pv = scenario["pv_profile"][hour]
+        demo_temp = scenario["temp_profile"][hour]
+        
+        # Override PV profile in environments
+        for env in [self.env_ppo, self.env_hybrid]:
+            if hasattr(env, 'pv_profile') and len(env.pv_profile) > hour:
+                env.pv_profile[hour] = demo_pv
+            # Override temperature in load_schedules if available
+            if hasattr(env, 'load_schedules') and len(env.load_schedules) > hour:
+                env.load_schedules[hour]['temp_out'] = demo_temp
+    
     def reset(self):
         """Reset simulation for new day"""
         seed = np.random.randint(0, 10000)
@@ -379,7 +460,12 @@ class RealModelSimulation:
         self.info_ppo = {}
         self.info_hybrid = {}
         
-        logger.info(f"🔄 Simulation reset (seed={seed})")
+        # Inject demo data if demo mode is active
+        if self.is_demo_mode:
+            self._inject_demo_data()
+            logger.info(f"🔄 Demo reset - Scenario: {self.current_scenario}")
+        else:
+            logger.info(f"🔄 Simulation reset (seed={seed})")
 
 
 # Global simulation instance
@@ -422,6 +508,35 @@ async def reset_sim():
     """Reset simulation"""
     sim.reset()
     return {"status": "reset"}
+
+
+@app.post("/set_mode")
+async def set_mode(payload: dict):
+    """Toggle demo mode and optionally change scenario"""
+    demo_mode = payload.get("demo_mode", False)
+    scenario = payload.get("scenario", None)
+    
+    sim.set_demo_mode(demo_mode, scenario)
+    
+    return {
+        "status": "ok",
+        "demo_mode": sim.is_demo_mode,
+        "scenario": sim.current_scenario,
+        "scenario_name": DEMO_SCENARIOS[sim.current_scenario]["name"] if sim.is_demo_mode else None
+    }
+
+
+@app.get("/scenarios")
+async def get_scenarios():
+    """List available demo scenarios"""
+    return {
+        "scenarios": [
+            {"key": key, "name": val["name"], "description": val["description"]}
+            for key, val in DEMO_SCENARIOS.items()
+        ],
+        "current_scenario": sim.current_scenario,
+        "demo_mode": sim.is_demo_mode
+    }
 
 
 @app.get("/reload-models")

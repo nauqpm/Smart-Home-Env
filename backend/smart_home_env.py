@@ -276,8 +276,9 @@ class SmartHomeEnv(gym.Env):
 
         prev_cost = self.total_cost
         import_bill = calculate_vietnam_tiered_bill(self.cumulative_import_kwh)
-        export_revenue = self.cumulative_export_kwh * 2000
-        self.total_cost = import_bill - export_revenue
+        # NOTE: Export revenue disabled - no feed-in tariff (không bán điện về lưới)
+        # export_revenue = self.cumulative_export_kwh * 2000
+        self.total_cost = import_bill  # Only import cost, no export credit
         step_cost = self.total_cost - prev_cost
 
         # -------- Reward --------

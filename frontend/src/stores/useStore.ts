@@ -7,6 +7,9 @@ interface EnvironmentData {
     temp: number;
     pv: number;
     price_tier: number;
+    // Demo mode fields (optional)
+    demo_mode?: boolean;
+    scenario_name?: string;
 }
 
 // Room-specific device actions
@@ -97,6 +100,11 @@ interface AppState {
     totalBill: number;
     weather: string;
     n_home: number;
+
+    // Demo Mode
+    isDemoMode: boolean;
+    currentScenario: 'ideal' | 'erratic' | 'heatwave';
+    setDemoMode: (enabled: boolean, scenario?: string) => Promise<void>;
 }
 
 const INITIAL_DEVICES: Record<string, Device> = {
@@ -317,4 +325,26 @@ export const useStore = create<AppState>((set, get) => ({
     totalBill: 0,
     weather: 'sunny',
     n_home: 2,
+
+    // Demo Mode
+    isDemoMode: false,
+    currentScenario: 'ideal',
+    setDemoMode: async (enabled, scenario) => {
+        const newScenario = scenario || get().currentScenario;
+        set({ isDemoMode: enabled, currentScenario: newScenario as any });
+
+        try {
+            await fetch('http://localhost:8000/set_mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ demo_mode: enabled, scenario: newScenario })
+            });
+            // Reset local state when toggling demo mode
+            if (enabled) {
+                get().resetSimulation();
+            }
+        } catch (e) {
+            console.error('Failed to set demo mode:', e);
+        }
+    },
 }));

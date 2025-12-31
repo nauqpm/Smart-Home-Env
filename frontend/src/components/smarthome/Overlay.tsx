@@ -7,7 +7,8 @@ export default function Overlay() {
     const {
         devices, isNight, batterySOC, gridImport, totalBill, weather, n_home,
         simData, currentViewMode, setViewMode, toggleNight, isConnected, resetSimulation,
-        manualOverride, toggleManualMode, toggleDevice
+        manualOverride, toggleManualMode, toggleDevice,
+        isDemoMode, currentScenario, setDemoMode
     } = useStore();
 
     const [activeTab, setActiveTab] = useState<'dashboard' | 'devices'>('dashboard');
@@ -155,6 +156,64 @@ export default function Overlay() {
                             >
                                 ✕
                             </div>
+                        </div>
+                    </div>
+
+                    {/* Demo Mode Control Bar */}
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 12px', borderRadius: 8,
+                        background: isDemoMode ? 'rgba(251, 146, 60, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                        border: isDemoMode ? '1px solid rgba(251, 146, 60, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+                        transition: 'all 0.3s'
+                    }}>
+                        {/* Toggle Switch */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: isDemoMode ? '#fb923c' : '#94a3b8' }}>
+                                🎬 Demo Mode
+                            </span>
+                            <div
+                                onClick={() => setDemoMode(!isDemoMode)}
+                                style={{
+                                    width: 44, height: 24, borderRadius: 12,
+                                    background: isDemoMode ? 'linear-gradient(135deg, #f97316, #ea580c)' : '#374151',
+                                    padding: 2, cursor: 'pointer',
+                                    transition: 'all 0.3s',
+                                    boxShadow: isDemoMode ? '0 0 12px rgba(249, 115, 22, 0.4)' : 'none'
+                                }}
+                            >
+                                <div style={{
+                                    width: 20, height: 20, borderRadius: '50%',
+                                    background: '#fff',
+                                    transform: isDemoMode ? 'translateX(20px)' : 'translateX(0)',
+                                    transition: 'transform 0.3s ease',
+                                    boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                                }} />
+                            </div>
+                        </div>
+
+                        {/* Scenario Dropdown */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 10, color: '#64748b' }}>Scenario:</span>
+                            <select
+                                value={currentScenario}
+                                onChange={(e) => setDemoMode(true, e.target.value)}
+                                disabled={!isDemoMode}
+                                style={{
+                                    background: isDemoMode ? 'rgba(251, 146, 60, 0.2)' : 'rgba(100, 116, 139, 0.2)',
+                                    border: isDemoMode ? '1px solid rgba(251, 146, 60, 0.4)' : '1px solid rgba(100, 116, 139, 0.3)',
+                                    borderRadius: 6, padding: '5px 10px',
+                                    color: isDemoMode ? '#fed7aa' : '#64748b',
+                                    fontSize: 11, fontWeight: 600,
+                                    cursor: isDemoMode ? 'pointer' : 'not-allowed',
+                                    opacity: isDemoMode ? 1 : 0.5,
+                                    outline: 'none'
+                                }}
+                            >
+                                <option value="ideal">☀️ Ideal Day</option>
+                                <option value="erratic">🌦️ Erratic Day</option>
+                                <option value="heatwave">🔥 Heatwave</option>
+                            </select>
                         </div>
                     </div>
 
