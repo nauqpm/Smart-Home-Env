@@ -281,25 +281,62 @@ class SmartHomeEnv(gym.Env):
         self.total_cost = import_bill  # Only import cost, no export credit
         step_cost = self.total_cost - prev_cost
 
-        # -------- Reward --------
-        reward = -step_cost / 2000.0 - comfort_penalty
+        # ======== IMPROVED REWARD FUNCTION ========
+        # Base reward: negative of step cost (normalized)
+        reward = -step_cost / 2000.0
+        
+        # --- 1. Comfort Penalty (Stronger) ---
+        # If occupied and temp too high, penalize more
+        for room, temp in self.room_temps.items():
+            if is_room_occupied(room, hour):
+                # Base comfort penalty
+                reward -= self._comfort_penalty(room, hour)
+                
+                # Mandatory AC penalty: If temp > 28°C and AC essentially off
+                if temp > 28.0:
+                    room_idx = ["living", "master", "bed2"].index(room) if room in ["living", "master", "bed2"] else -1
+                    if room_idx >= 0:
+                        ac_usage = ac_vals[room_idx]  # 0-1 normalized
+                        if ac_usage < 0.2:  # AC essentially off when needed
+                            reward -= 2.0  # Strong penalty for ignoring comfort
 
-        # EV shaping
-        hours_left = max(1, self.ev_deadline - hour)
+        # --- 2. Per-Step Task Urgency Penalties (MUCH STRONGER) ---
+        # WM: Must complete by hour 22 (deadline)
+        if self.wm_remaining > 0:
+            hours_until_wm_deadline = max(1, self.wm_deadline - hour)
+            wm_urgency = self.wm_remaining / hours_until_wm_deadline
+            reward -= wm_urgency * 5.0  # Increased from 1.0 to 5.0
+        
+        # DW: Must complete by hour 23
+        if self.dw_remaining > 0:
+            hours_until_dw_deadline = max(1, self.dw_deadline - hour)
+            dw_urgency = self.dw_remaining / hours_until_dw_deadline
+            reward -= dw_urgency * 4.0  # Increased from 0.8 to 4.0
+        
+        # --- 3. EV Charging Urgency (MUCH STRONGER) ---
+        hours_left = max(1, self.ev_deadline - hour) if hour < self.ev_deadline else max(1, 24 - hour + self.ev_deadline)
         ev_deficit = max(0.0, EV_CONFIG["min_target_soc"] - self.ev_soc)
-        reward -= ev_deficit * (5.0 / hours_left)
+        # Quadratic penalty that grows faster as deadline approaches
+        reward -= (ev_deficit ** 2) * (50.0 / hours_left)  # Increased from 10.0 to 50.0
+
+        # --- 4. Task Completion Bonuses ---
+        # Encourage actually completing tasks
+        # Note: These are implicitly handled since completing tasks removes penalties
 
         # -------- Step --------
         self.t += 1
         done = self.t >= self.sim_steps
 
         if done:
+            # --- 5. MASSIVE End-of-Episode Penalties (10x original) ---
+            # These must be MUCH larger than any cost savings from not running devices
             if self.wm_remaining > 0:
-                reward -= 20
+                reward -= 200  # Was 60, now 200
             if self.dw_remaining > 0:
-                reward -= 15
+                reward -= 150  # Was 45, now 150
             if self.ev_soc < EV_CONFIG["min_target_soc"]:
-                reward -= 30
+                ev_shortfall = EV_CONFIG["min_target_soc"] - self.ev_soc
+                reward -= 300 + ev_shortfall * 200  # Was 100+50, now 300+200
 
         return (
             self._get_obs() if not done else np.zeros(13, dtype=np.float32),

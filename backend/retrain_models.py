@@ -1,14 +1,20 @@
 """
-Quick retrain PPO and Hybrid models to match new observation space (13 dims)
+Complete Retrain Script for PPO and Hybrid Models
+- Includes BC (Behavior Cloning) training for Hybrid warm-start
 - Reduced epochs (1000) for quick testing
 - Increase to 10000+ for production
 - Hybrid uses BC warm-start from bc_policy.pt
 """
 
 import os
+import argparse
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.optim as optim
+from datetime import datetime, timedelta
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
@@ -17,6 +23,175 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 import gymnasium as gym
 from smart_home_env import SmartHomeEnv
+from device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, DEVICE_CONFIG, THERMAL_CONSTANTS
+
+# =====================================================
+# Constants
+# =====================================================
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
+ACTION_DIM = 7
+OBS_DIM = 13
+
+
+# =====================================================
+# BC (Behavior Cloning) Training Section
+# =====================================================
+class BCPolicyPPOCompat(nn.Module):
+    """
+    BC Policy with PPO-compatible layer names.
+    Uses EXACT same key names as SB3's MlpPolicy for warm-start.
+    """
+    def __init__(self, obs_dim=OBS_DIM, action_dim=ACTION_DIM):
+        super().__init__()
+        
+        self.mlp_extractor = nn.ModuleDict({
+            'policy_net': nn.Sequential(
+                nn.Linear(obs_dim, 64),
+                nn.Tanh(),
+                nn.Linear(64, 64),
+                nn.Tanh(),
+            )
+        })
+        
+        self.action_net = nn.Linear(64, action_dim)
+        
+    def forward(self, x):
+        features = self.mlp_extractor['policy_net'](x)
+        return self.action_net(features)
+
+
+def expert_heuristic_action(obs, hour, price):
+    """Generate expert action for all 7 dimensions."""
+    action = np.zeros(7, dtype=np.float32)
+    
+    soc = obs[0]
+    n_home = obs[6]
+    room_temps = obs[8:11]
+    ev_soc = obs[12]
+    
+    # Battery: Charge when cheap, discharge when expensive
+    if price[hour] < 0.12:
+        action[0] = 0.8 if soc < 0.8 else 0.0
+    elif price[hour] > 0.20:
+        action[0] = -0.8 if soc > 0.3 else 0.0
+    else:
+        action[0] = 0.0
+    
+    # ACs: Turn on when occupied and hot
+    comfort_temp = THERMAL_CONSTANTS["comfort_temp"]
+    for idx, room in enumerate(["living", "master", "bed2"]):
+        if is_room_occupied(room, hour) and n_home > 0:
+            temp_diff = room_temps[idx] - comfort_temp
+            if temp_diff > 2:
+                action[1 + idx] = min(1.0, temp_diff / 5)
+            elif temp_diff < -2:
+                action[1 + idx] = -0.5
+            else:
+                action[1 + idx] = 0.3
+        else:
+            action[1 + idx] = -1.0
+    
+    # EV: Charge during off-peak or when deadline approaching
+    deadline = EV_CONFIG["deadline_hour"]
+    target_soc = EV_CONFIG["min_target_soc"]
+    hours_left = (deadline - hour) % 24
+    hours_left = max(1, hours_left)
+    
+    if (hour >= 22 or hour < 4) and ev_soc < 0.9:
+        action[4] = 1.0
+    elif ev_soc < target_soc and hours_left < 6:
+        action[4] = 1.0
+    elif ev_soc < 0.5 and price[hour] < 0.15:
+        action[4] = 0.7
+    else:
+        action[4] = -1.0
+    
+    # WM/DW: Run during off-peak hours
+    if 0 <= hour < 6 or 22 <= hour < 24:
+        action[5] = 1.0
+        action[6] = 1.0
+    else:
+        action[5] = -1.0
+        action[6] = -1.0
+    
+    return np.clip(action, -1, 1)
+
+
+def collect_expert_data(n_episodes=50):
+    """Collect expert demonstrations for all 7 actions"""
+    obs_list, act_list = [], []
+    price = np.array([0.1] * 6 + [0.15] * 6 + [0.25] * 6 + [0.18] * 6)
+    pv = np.zeros(24)
+
+    config = {'sim_steps': 24}
+
+    for ep in range(n_episodes):
+        day = datetime(2025, 1, 1) + timedelta(days=random.randint(0, 365))
+        config["sim_start"] = day.strftime("%Y-%m-%d")
+
+        env = SmartHomeEnv(price, pv, config)
+        obs, _ = env.reset()
+
+        for t in range(env.sim_steps):
+            hour = t % 24
+            expert_action = expert_heuristic_action(obs, hour, price)
+            
+            obs_list.append(obs.astype(np.float32))
+            act_list.append(expert_action)
+
+            obs, _, done, _, _ = env.step(expert_action)
+            if done:
+                break
+
+        if (ep + 1) % 10 == 0:
+            print(f"  Collected episode {ep + 1}/{n_episodes}")
+
+    return np.stack(obs_list), np.stack(act_list)
+
+
+def train_bc(X, Y, epochs=100):
+    """Train BC policy with PPO-compatible architecture"""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = BCPolicyPPOCompat(obs_dim=X.shape[1], action_dim=Y.shape[1]).to(device)
+
+    opt = optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = nn.MSELoss()
+
+    X_t = torch.tensor(X, device=device)
+    Y_t = torch.tensor(Y, device=device)
+
+    print(f"  Training BC Policy: {X.shape[0]} samples, {epochs} epochs")
+
+    for e in range(epochs):
+        opt.zero_grad()
+        pred = model(X_t)
+        loss = loss_fn(pred, Y_t)
+        loss.backward()
+        opt.step()
+
+        if (e + 1) % 50 == 0:
+            print(f"    Epoch {e+1}/{epochs} | Loss {loss.item():.4f}")
+
+    save_dict = {"model_state_dict": model.state_dict()}
+    torch.save(save_dict, "bc_policy.pt")
+    print(f"  Saved bc_policy.pt")
+
+
+def run_bc_training(episodes=100, epochs=150):
+    """Run complete BC training pipeline"""
+    print(f"\n{'='*60}")
+    print(f"Phase 1: Behavior Cloning (IL) Training")
+    print(f"{'='*60}")
+    
+    X, Y = collect_expert_data(n_episodes=episodes)
+    print(f"  Dataset: X={X.shape}, Y={Y.shape}")
+    
+    train_bc(X, Y, epochs=epochs)
+    print(f"  BC training complete!")
 
 
 # =====================================================
@@ -269,7 +444,15 @@ def train_ppo(episodes=1000):
         n_steps=2048,
         batch_size=64,
         learning_rate=3e-4,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2,
+        ent_coef=0.05,  # Higher entropy for more exploration
+        vf_coef=0.5,
     )
+    
+    # BC warm-start for PPO too - helps avoid starting from random policy
+    model = load_il_weights_into_ppo(model, path="bc_policy.pt")
 
     model.learn(
         total_timesteps=total_timesteps,
@@ -278,7 +461,7 @@ def train_ppo(episodes=1000):
 
     model.save("ppo_smart_home")
     np.save("ppo_baseline_rewards.npy", reward_logger.episode_rewards)
-    print(f"\n✅ PPO model saved to ppo_smart_home.zip")
+    print(f"\n PPO model saved to ppo_smart_home.zip")
     
     return reward_logger.episode_rewards
 
@@ -313,7 +496,7 @@ def train_hybrid(episodes=1000):
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.01,
+        ent_coef=0.05,  # Higher entropy for more exploration
         vf_coef=0.5,
         verbose=0,
     )
@@ -334,23 +517,44 @@ def train_hybrid(episodes=1000):
 
 
 def main():
-    # Full training (10000 episodes) - takes ~20-30 minutes
-    EPISODES = 10000  # Production quality training
+    parser = argparse.ArgumentParser(description="Complete retraining script for Smart Home RL models")
+    parser.add_argument("--episodes", type=int, default=10000, help="Number of episodes for PPO training")
+    parser.add_argument("--bc-episodes", type=int, default=100, help="Number of episodes for BC data collection")
+    parser.add_argument("--bc-epochs", type=int, default=150, help="Number of epochs for BC training")
+    parser.add_argument("--skip-bc", action="store_true", help="Skip BC training if bc_policy.pt exists")
+    args = parser.parse_args()
+
+    EPISODES = args.episodes
 
     print("\n" + "="*60)
-    print("🚀 RETRAINING MODELS FOR NEW OBSERVATION SPACE (13 dims)")
+    print("COMPLETE RETRAINING PIPELINE")
+    print("  Phase 1: Behavior Cloning (BC) for Hybrid warm-start")
+    print("  Phase 2: PPO Training")
+    print("  Phase 3: Hybrid PPO Training")
     print("="*60)
     
     # Check observation space
     env = SmartHomeEnv(None, None, {"sim_steps": 24})
     obs, _ = env.reset()
-    print(f"\n📐 Current observation space: {env.observation_space.shape}")
-    print(f"📐 Sample observation shape: {obs.shape}")
+    print(f"\nCurrent observation space: {env.observation_space.shape}")
+    print(f"Sample observation shape: {obs.shape}")
     
-    # Train PPO
+    # Phase 1: BC Training
+    if args.skip_bc and os.path.exists("bc_policy.pt"):
+        print(f"\n[Phase 1] Skipping BC training - bc_policy.pt already exists")
+    else:
+        run_bc_training(episodes=args.bc_episodes, epochs=args.bc_epochs)
+    
+    # Phase 2: Train PPO
+    print(f"\n{'='*60}")
+    print(f"Phase 2: PPO Training ({EPISODES} episodes)")
+    print(f"{'='*60}")
     ppo_rewards = train_ppo(episodes=EPISODES)
     
-    # Train Hybrid
+    # Phase 3: Train Hybrid
+    print(f"\n{'='*60}")
+    print(f"Phase 3: Hybrid PPO Training ({EPISODES} episodes)")
+    print(f"{'='*60}")
     hybrid_rewards = train_hybrid(episodes=EPISODES)
     
     # Plot comparison
@@ -372,10 +576,11 @@ def main():
     
     plt.tight_layout()
     plt.savefig("training_rewards.png")
-    print(f"\n📊 Training plot saved to training_rewards.png")
+    print(f"\nTraining plot saved to training_rewards.png")
     
     print("\n" + "="*60)
-    print("✅ TRAINING COMPLETE!")
+    print("TRAINING COMPLETE!")
+    print("   - bc_policy.pt (BC warm-start weights)")
     print("   - ppo_smart_home.zip")
     print("   - ppo_hybrid_smart_home.zip")
     print("="*60)
