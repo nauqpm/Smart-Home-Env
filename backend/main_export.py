@@ -65,11 +65,11 @@ def run_agent_episode(model, env_config, seed=42, agent_name="Agent"):
         obs, reward, terminated, truncated, info = env.step(action)
         
         # Record
-        metrics["soc"].append(float(info["soc"]))
+        metrics["soc"].append(float(env.soc))
         
         # Safe Grid Access (Fallback if attribute missing)
-        grid_val = getattr(env, 'last_grid_action', 0.0) 
-        # Or deduce from info if possible, but let's stick to safe attr for now
+        # grid_val = getattr(env, 'last_grid_action', 0.0) 
+        grid_val = info.get("step_grid_import", 0.0)
         metrics["grid_import"].append(float(grid_val)) 
         
         metrics["cost"].append(float(info["total_cost"]))
@@ -90,7 +90,16 @@ def main():
     config = {
         'residents': ['office_worker', 'student', 'father', 'mother'],
         'must_run_base': 0.4,
-        'battery': {'capacity_kwh': 10.0, 'soc_init': 0.5, 'soc_min': 0.1, 'soc_max': 0.9},
+        'battery': {
+            'capacity_kwh': 10.0, 
+            'soc_init': 0.5, 
+            'soc_min': 0.1, 
+            'soc_max': 0.9,
+            'p_charge_max_kw': 3.0,
+            'p_discharge_max_kw': 3.0,
+            'eta_ch': 0.95,
+            'eta_dis': 0.95
+        },
         'sim_steps': 24, 
         'sim_freq': '1h',
         # Dummy devices for action space sizing

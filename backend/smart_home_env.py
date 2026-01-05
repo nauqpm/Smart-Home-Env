@@ -258,18 +258,50 @@ class SmartHomeEnv(gym.Env):
         # -------- Fixed --------
         total_load += must_run
 
-        # -------- Battery --------
-        bat_p = 0.0
-        if act_bat > 0:  # charge
-            bat_p = act_bat * self.battery["p_charge_max_kw"]
-            delta = bat_p * self.time_step_h * self.battery["eta_ch"] / self.battery["capacity_kwh"]
-            self.soc = clamp(self.soc + delta, self.battery["soc_min"], self.battery["soc_max"])
-            total_load += bat_p
-        else:  # discharge
-            bat_p = -act_bat * self.battery["p_discharge_max_kw"]
-            delta = bat_p * self.time_step_h / self.battery["eta_dis"] / self.battery["capacity_kwh"]
-            self.soc = clamp(self.soc - delta, self.battery["soc_min"], self.battery["soc_max"])
-            total_load -= bat_p
+        # -------- Battery (Physics Fix) --------
+        bat_action_p = 0.0
+        if act_bat > 0:  # Requested Charge
+            max_charge_p = self.battery["p_charge_max_kw"]
+            # Energy needed to reach 100% (or soc_max)
+            max_energy_space = (self.battery["soc_max"] - self.soc) * self.battery["capacity_kwh"]
+            # Max power limited by available space over this time step
+            # P_lim = E_space / (dt * eta)
+            max_p_by_soc = max_energy_space / (self.time_step_h * self.battery["eta_ch"])
+            
+            # Realizable Power
+            bat_p = min(max_charge_p, max_p_by_soc)
+            
+            # Physics Update
+            energy_in = bat_p * self.time_step_h * self.battery["eta_ch"]
+            delta_soc = energy_in / self.battery["capacity_kwh"]
+            self.soc = clamp(self.soc + delta_soc, self.battery["soc_min"], self.battery["soc_max"])
+            
+            total_load += bat_p # Load increases by input power
+            
+        else:  # Requested Discharge
+            max_discharge_p = self.battery["p_discharge_max_kw"]
+            # Energy available above soc_min
+            available_energy = (self.soc - self.battery["soc_min"]) * self.battery["capacity_kwh"]
+            # Max power limited by available energy
+            # P_lim = E_avail * eta / dt   <-- Wait, discharge: E_out = P * dt / eta_dis? No.
+            # Standard model: 
+            #   Charge:   dSOC = P * dt * eta / Cap
+            #   Dischg:   dSOC = P * dt / (eta * Cap) -> Energy taken from batt = P * dt / eta
+            #   Here, 'bat_p' is usually the DC power or AC power? 
+            #   Typically P is AC side.
+            #   Discharge (AC side P): Energy removed from internal = P * dt / eta_dis
+            
+            max_p_by_soc = (available_energy * self.battery["eta_dis"]) / self.time_step_h
+            
+            # Realizable Power (magnitude)
+            bat_p_mag = min(max_discharge_p * abs(act_bat), max_p_by_soc)
+            
+            # Physics Update
+            energy_out_internal = (bat_p_mag * self.time_step_h) / self.battery["eta_dis"]
+            delta_soc = energy_out_internal / self.battery["capacity_kwh"]
+            self.soc = clamp(self.soc - delta_soc, self.battery["soc_min"], self.battery["soc_max"])
+            
+            total_load -= bat_p_mag # Load decreases by output power
 
         # -------- Grid --------
         pv = self.pv_profile[self.t]
@@ -304,6 +336,16 @@ class SmartHomeEnv(gym.Env):
                         ac_usage = ac_vals[room_idx]  # 0-1 normalized
                         if ac_usage < 0.2:  # AC essentially off when needed
                             reward -= 2.0  # Strong penalty for ignoring comfort
+                
+                # --- NEW: Over-Cooling Penalty (Fair Competition) ---
+                # Penalty: Cooling when already cold (wasting energy)
+                comfort_temp = THERMAL_CONSTANTS["comfort_temp"]
+                if temp < comfort_temp - 1.0:  # Room is already below 24°C
+                    room_idx = ["living", "master", "bed2"].index(room) if room in ["living", "master", "bed2"] else -1
+                    if room_idx >= 0:
+                        ac_usage = ac_vals[room_idx]
+                        if ac_usage > 0.2:  # AC is running when not needed
+                            reward -= 3.0  # Strong penalty for over-cooling
 
         # --- 2. Per-Step Task Urgency Penalties (MUCH STRONGER) ---
         # WM: Must complete by hour 22 (deadline)
@@ -381,6 +423,7 @@ class SmartHomeEnv(gym.Env):
                 # Env context
                 "weather": self.config.get("board_config", {}).get("weather", "sunny"), # Fallback
                 "temp": temp_out, # Use captured variable
-                "pv": pv_val      # Use captured variable
+                "pv": pv_val,      # Use captured variable
+                "load": total_load # Total home consumption
             },
         )

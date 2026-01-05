@@ -1,0 +1,33 @@
+{
+  "evaluation_date": "2026-01-01T10:56:33.213169",
+  "n_days_evaluated": 30,
+  "PPO": {
+    "avg_daily_bill_vnd": 26115.2533009847,
+    "std_daily_bill_vnd": 3683.2667244095333,
+    "total_bill_vnd": 783457.599029541,
+    "avg_daily_import_kwh": 13.162930091222128,
+    "avg_daily_export_kwh": 45.98426356712977,
+    "wm_completion_rate": 100.0,
+    "dw_completion_rate": 100.0,
+    "ev_target_met_rate": 100.0,
+    "avg_comfort_score": 78.17113703621759,
+    "avg_reward": -51.58056974503354
+  },
+  "Hybrid": {
+    "avg_daily_bill_vnd": 6054.420053100586,
+    "std_daily_bill_vnd": 54.10256069168028,
+    "total_bill_vnd": 181632.60159301758,
+    "avg_daily_import_kwh": 3.051623010635376,
+    "avg_daily_export_kwh": 36.3348851442337,
+    "wm_completion_rate": 100.0,
+    "dw_completion_rate": 100.0,
+    "ev_target_met_rate": 0.0,
+    "avg_comfort_score": 82.04006672965156,
+    "avg_reward": -529.3014843395486
+  },
+  "comparison": {
+    "bill_difference_vnd": 20060.83324788411,
+    "bill_reduction_percent": 76.8165371274714,
+    "comfort_difference": 3.8689296934339694
+  }
+}
