@@ -7,7 +7,7 @@ import './App.css';
 const WS_URL = 'ws://localhost:8000/ws';
 
 function App() {
-  const { updateSimData, setIsConnected, isConnected, setWsRef } = useStore();
+  const { updateSimData, setIsConnected, isConnected, setWsRef, setReportData } = useStore();
 
   // WebSocket connection with exponential backoff reconnection
   useEffect(() => {
@@ -36,8 +36,19 @@ function App() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          // Data from backend matches SimulationPacket interface
-          updateSimData(data);
+
+          // Check for FINAL_REPORT message from demo mode
+          if (data.type === 'FINAL_REPORT') {
+            console.log('📊 Received FINAL_REPORT:', data.data?.scenario);
+            setReportData(data.data);
+            // Also update simData with the included packet data
+            if (data.timestamp) {
+              updateSimData(data);
+            }
+          } else {
+            // Regular simulation packet
+            updateSimData(data);
+          }
         } catch (e) {
           console.error('Parse error:', e);
         }

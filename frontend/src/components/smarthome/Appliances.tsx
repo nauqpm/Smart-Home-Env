@@ -37,7 +37,7 @@ function useActiveAgentData() {
     const actions = activeAgentData?.actions || {
         ac_living: 0, ac_master: 0, ac_bed2: 0,
         light_living: 0, light_master: 0, light_bed2: 0, light_kitchen: 0, light_toilet: 0,
-        wm: 0, ev: 0, battery: 'idle'
+        wm: 0, dw: 0, ev: 0, battery: 'idle'
     };
     const soc = activeAgentData?.soc || 50;
 
@@ -63,9 +63,9 @@ function SmartTV({ position }: { position: [number, number, number] }) {
                 <boxGeometry args={[1.45, 0.85, 0.04]} />
                 <primitive object={plasticBlack} attach="material" />
             </mesh>
-            {/* LED glow when ON */}
+            {/* LED glow when ON - BOOSTED */}
             {isOn && (
-                <pointLight position={[0, 0, 0.2]} intensity={0.5} distance={3} color={0x4aa3df} />
+                <pointLight position={[0, 0, 0.5]} intensity={2.0} distance={4} color={0x4aa3df} />
             )}
         </group>
     );
@@ -95,11 +95,20 @@ function SmartFridge({ position, rotation = [0, 0, 0] }: { position: [number, nu
                 <boxGeometry args={[0.04, 0.7, 0.04]} />
                 <primitive object={plasticBlack} attach="material" />
             </mesh>
-            {/* Smart Panel */}
+            {/* Smart Panel - BOOSTED */}
             <mesh position={[0.18, 0.35, 0.33]}>
                 <planeGeometry args={[0.18, 0.25]} />
-                <primitive object={isOn ? panelGlow : screenOff} attach="material" />
+                <meshStandardMaterial
+                    color={isOn ? 0xccffcc : 0x111111}
+                    emissive={isOn ? 0xccffcc : 0x000000}
+                    emissiveIntensity={isOn ? 4.0 : 0}
+                />
             </mesh>
+
+            {/* Added: Floor Glow to indicate ON state clearly */}
+            {isOn && (
+                <pointLight position={[0, -0.8, 0.5]} intensity={1.0} distance={2.0} color={0xccffcc} />
+            )}
         </group>
     );
 }
@@ -138,7 +147,11 @@ function AirConditioner({ position, rotation = [0, 0, 0], id }: { position: [num
             {/* Animated Vent */}
             <mesh ref={ventRef} position={[0, -0.08, 0.14]}>
                 <boxGeometry args={[0.9, 0.08, 0.02]} />
-                <primitive object={isOn ? acActiveGlow : plasticBlack} attach="material" />
+                <meshStandardMaterial
+                    color={isOn ? 0x88ccff : 0x222222}
+                    emissive={isOn ? 0x88ccff : 0x000000}
+                    emissiveIntensity={isOn ? 3.0 : 0}
+                />
             </mesh>
 
             {/* Internal Fan (visible through vent) */}
@@ -151,20 +164,24 @@ function AirConditioner({ position, rotation = [0, 0, 0], id }: { position: [num
                 ))}
             </group>
 
-            {/* LED Status Light */}
+            {/* LED Status Light - Boosted */}
             <mesh position={[0.4, 0.08, 0.14]}>
                 <sphereGeometry args={[0.02, 16, 16]} />
-                <primitive object={isOn ? ledOn : ledOff} attach="material" />
+                <meshStandardMaterial
+                    color={isOn ? 0x00ff00 : 0x550000}
+                    emissive={isOn ? 0x00ff00 : 0x000000}
+                    emissiveIntensity={isOn ? 5.0 : 0}
+                />
             </mesh>
 
-            {/* Cold air glow when ON */}
+            {/* Cold air glow when ON - Boosted */}
             {isOn && (
                 <>
-                    <pointLight position={[0, -0.3, 0.2]} intensity={0.4} distance={2.5} color={0x88ccff} />
+                    <pointLight position={[0, -0.3, 0.2]} intensity={1.5} distance={3.0} color={0x88ccff} />
                     {/* Cold air particles effect placeholder */}
                     <mesh position={[0, -0.4, 0.1]}>
                         <planeGeometry args={[0.6, 0.3]} />
-                        <meshBasicMaterial color={0xaaddff} transparent opacity={0.2} />
+                        <meshBasicMaterial color={0xaaddff} transparent opacity={0.3} />
                     </mesh>
                 </>
             )}
@@ -215,7 +232,7 @@ function WashingMachine({ position }: { position: [number, number, number] }) {
                 <meshStandardMaterial
                     color={isOn ? 0x00ff00 : 0x333333}
                     emissive={isOn ? 0x00ff00 : 0x000000}
-                    emissiveIntensity={isOn ? 2 : 0}
+                    emissiveIntensity={isOn ? 5.0 : 0}
                 />
             </mesh>
 
@@ -238,22 +255,22 @@ function WashingMachine({ position }: { position: [number, number, number] }) {
                         <meshStandardMaterial color={0x555555} />
                     </mesh>
                 ))}
-                {/* Water/Glass effect */}
+                {/* Water/Glass effect - Boosted */}
                 <mesh ref={waterGlowRef} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.01]}>
                     <circleGeometry args={[0.17, 32]} />
                     <meshStandardMaterial
                         color={isOn ? 0x66ccff : 0x88ccff}
                         transparent
-                        opacity={isOn ? 0.6 : 0.3}
+                        opacity={isOn ? 0.7 : 0.3}
                         emissive={isOn ? 0x4488cc : 0x000000}
-                        emissiveIntensity={isOn ? 0.5 : 0}
+                        emissiveIntensity={isOn ? 2.0 : 0}
                     />
                 </mesh>
             </group>
 
-            {/* Vibration glow when running */}
+            {/* Vibration glow when running - Boosted */}
             {isOn && (
-                <pointLight position={[0, 0, 0.4]} intensity={0.3} distance={1} color={0x88ccff} />
+                <pointLight position={[0, 0, 0.5]} intensity={1.2} distance={2.0} color={0x88ccff} />
             )}
         </group>
     );
@@ -406,6 +423,66 @@ function EVCharger({ position }: { position: [number, number, number] }) {
 }
 
 // ==========================================
+// DISHWASHER
+// ==========================================
+function Dishwasher({ position, rotation = [0, 0, 0] }: { position: [number, number, number], rotation?: [number, number, number] }) {
+    const { actions, devices } = useActiveAgentData();
+    const isOn = devices.dw?.isOn || actions.dw === 1;
+
+    // Pulse animation for active state
+    const ledRef = useRef<THREE.Mesh>(null);
+    useFrame((state) => {
+        if (ledRef.current && isOn) {
+            const pulse = Math.sin(state.clock.elapsedTime * 4) * 0.5 + 0.5;
+            (ledRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.0 + pulse * 2.0;
+        }
+    });
+
+    return (
+        <group position={position} rotation={rotation}>
+            {/* Body */}
+            <mesh castShadow receiveShadow>
+                <boxGeometry args={[0.6, 0.82, 0.58]} />
+                <primitive object={metalSilver} attach="material" />
+            </mesh>
+            {/* Control Panel Strip */}
+            <mesh position={[0, 0.35, 0.3]}>
+                <boxGeometry args={[0.6, 0.12, 0.02]} />
+                <primitive object={plasticBlack} attach="material" />
+            </mesh>
+            {/* Handle/Grip */}
+            <mesh position={[0, 0.25, 0.32]}>
+                <boxGeometry args={[0.4, 0.04, 0.04]} />
+                <primitive object={metalSilver} attach="material" />
+            </mesh>
+            {/* Status Display Area */}
+            <mesh ref={ledRef} position={[0.15, 0.35, 0.315]}>
+                <planeGeometry args={[0.15, 0.06]} />
+                <meshStandardMaterial
+                    color={isOn ? 0x00ff00 : 0x111111}
+                    emissive={isOn ? 0x00ff00 : 0x000000}
+                    emissiveIntensity={isOn ? 3.0 : 0}
+                />
+            </mesh>
+            {/* Function LED indicator */}
+            <mesh position={[-0.2, 0.35, 0.315]}>
+                <circleGeometry args={[0.015, 16]} />
+                <meshStandardMaterial
+                    color={isOn ? 0x00ccff : 0x333333}
+                    emissive={isOn ? 0x00ccff : 0x000000}
+                    emissiveIntensity={isOn ? 4.0 : 0}
+                />
+            </mesh>
+
+            {/* Floor Glow when running */}
+            {isOn && (
+                <pointLight position={[0, -0.4, 0.4]} intensity={1.5} distance={1.5} color={0x00ff00} />
+            )}
+        </group>
+    );
+}
+
+// ==========================================
 // MAIN EXPORT
 // ==========================================
 export default function Appliances() {
@@ -422,6 +499,9 @@ export default function Appliances() {
             {/* ZONE A: KITCHEN */}
             {/* ============================================ */}
             <SmartFridge position={[0.6, 0.9, -3.3]} rotation={[0, 0, 0]} />
+
+            {/* DISHWASHER - Under counter, between fridge and sink */}
+            <Dishwasher position={[1.05, 0.45, -3.4]} />
 
             {/* ============================================ */}
             {/* UTILITY CLOSET */}

@@ -61,7 +61,7 @@ export default function SmartLight({
         const ledMaterial = useMemo(() => new THREE.MeshStandardMaterial({
             color: isOn ? color : 0x333333,
             emissive: isOn ? color : 0x000000,
-            emissiveIntensity: isOn ? 2.5 : 0,
+            emissiveIntensity: isOn ? 5.0 : 0, // Boosted from 2.5
             roughness: 0.1,
             metalness: 0.0,
         }), [isOn, color]);
@@ -101,12 +101,12 @@ export default function SmartLight({
                     <primitive object={metalDark} attach="material" />
                 </mesh>
 
-                {/* Light sources along the bar */}
+                {/* Light sources along the bar - Boosted Intensity */}
                 <pointLight
                     ref={glowRef}
                     position={[0, -0.1, 0]}
-                    intensity={isOn ? 2 : 0}
-                    distance={6}
+                    intensity={isOn ? 3.0 : 0}
+                    distance={8}
                     color={color}
                     castShadow
                     shadow-mapSize-width={256}
@@ -115,14 +115,14 @@ export default function SmartLight({
                 {/* Additional fill lights for even distribution */}
                 <pointLight
                     position={[-length / 3, -0.08, 0]}
-                    intensity={isOn ? 1 : 0}
-                    distance={4}
+                    intensity={isOn ? 1.5 : 0}
+                    distance={5}
                     color={color}
                 />
                 <pointLight
                     position={[length / 3, -0.08, 0]}
-                    intensity={isOn ? 1 : 0}
-                    distance={4}
+                    intensity={isOn ? 1.5 : 0}
+                    distance={5}
                     color={color}
                 />
             </group>
@@ -136,7 +136,7 @@ export default function SmartLight({
         const bulbMaterial = useMemo(() => new THREE.MeshStandardMaterial({
             color: isOn ? 0xffdd44 : 0x444444,
             emissive: isOn ? 0xffdd44 : 0x000000,
-            emissiveIntensity: isOn ? 2 : 0,
+            emissiveIntensity: isOn ? 5.0 : 0, // Boosted
             roughness: 0.2,
             metalness: 0.1,
             transparent: true,

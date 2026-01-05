@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../../stores/useStore';
 import ComparisonDashboard from './ComparisonDashboard';
+import ReportModal from './ReportModal';
 
 export default function Overlay() {
     const {
@@ -393,5 +394,10 @@ export default function Overlay() {
     );
 
     // Portal to document.body so overlay stays fixed when 3D camera moves
-    return createPortal(overlayContent, document.body);
+    return (
+        <>
+            {createPortal(overlayContent, document.body)}
+            <ReportModal />
+        </>
+    );
 }

@@ -207,8 +207,13 @@ class SmartHomeEnv(gym.Env):
 
     # -------------------------------------------------
     def step(self, action):
+        # Capture current step properties BEFORE incrementing t
         hour = self.times[self.t].hour
         must_run = self.load_schedules[self.t]["must_run"]
+        n_home = self.load_schedules[self.t]["n_home"]
+        temp_out = self.load_schedules[self.t]["temp_out"]
+        pv_val = self.pv_profile[self.t]
+        
         a = np.array(action).clip(-1, 1)
 
         # -------- Actions --------
@@ -338,10 +343,44 @@ class SmartHomeEnv(gym.Env):
                 ev_shortfall = EV_CONFIG["min_target_soc"] - self.ev_soc
                 reward -= 300 + ev_shortfall * 200  # Was 100+50, now 300+200
 
+        # -------- Info for Visualization --------
+        # Heuristic for lights based on occupancy AND time (avoid sleeping hours)
+        # Use locally captured variables (hour, n_home)
+        # Active hours: Morning (6-8) or Evening (17-23). 
+        # Note: 23 is usually bedtime, so we can cut off AT 23 (lights off from 23:00 onwards).
+        is_active_time = (6 <= hour < 9) or (17 <= hour < 23)
+        lights_on = 1 if (n_home > 0 and is_active_time) else 0
+        
         return (
             self._get_obs() if not done else np.zeros(13, dtype=np.float32),
             float(reward),
             done,
             False,
-            {"step_cost": step_cost, "total_cost": self.total_cost},
+            {
+                "step_cost": step_cost, 
+                "total_cost": self.total_cost,
+                "step_grid_import": grid_import * self.time_step_h,
+                "room_temps": dict(self.room_temps),
+                
+                # Device States for Visualization
+                "ac_living": 1 if ac_vals[0] > 0.4 else 0,
+                "ac_master": 1 if ac_vals[1] > 0.4 else 0,
+                "ac_bed2": 1 if ac_vals[2] > 0.4 else 0,
+                "wm": 1 if act_wm else 0,
+                "dw": 1 if act_dw else 0,
+                "ev": 1 if act_ev > 0.1 else 0,
+                "battery": "charge" if act_bat > 0.01 else ("discharge" if act_bat < -0.01 else "idle"),
+                
+                # Heuristic Lights
+                "light_living": lights_on,
+                "light_master": lights_on,
+                "light_bed2": lights_on,
+                "light_kitchen": lights_on,
+                "light_toilet": lights_on,
+                
+                # Env context
+                "weather": self.config.get("board_config", {}).get("weather", "sunny"), # Fallback
+                "temp": temp_out, # Use captured variable
+                "pv": pv_val      # Use captured variable
+            },
         )

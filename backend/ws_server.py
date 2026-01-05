@@ -74,6 +74,81 @@ DEMO_SCENARIOS = {
 }
 
 
+# Session Statistics for Demo Report
+class SessionStats:
+    """Track metrics during demo session for final report generation"""
+    
+    def __init__(self):
+        self.reset()
+    
+    def reset(self):
+        self.total_bill = 0.0
+        self.total_grid_import = 0.0
+        self.total_comfort_loss = 0.0
+        self.temp_history = []  # [{outdoor, indoor}]
+        self.energy_stack = []  # [{pv, grid, battery}]
+        self.hourly_bills = []
+        
+        # Additional metrics
+        self.total_solar_generated = 0.0
+        self.total_solar_used = 0.0
+        self.total_battery_discharged = 0.0
+        self.peak_load = 0.0
+        self.indoor_temps = []  # For avg/min/max calculation
+    
+    def update(self, step_bill, grid_kw, indoor_temp, outdoor_temp, pv_used, battery_discharged, 
+               pv_generated=0, total_load=0):
+        self.total_bill += float(step_bill)
+        self.total_grid_import += max(0.0, float(grid_kw))
+        self.hourly_bills.append(float(step_bill))
+        
+        # Comfort loss: deviation from 24-27°C comfort range
+        indoor = float(indoor_temp)
+        if indoor < 24:
+            self.total_comfort_loss += (24 - indoor)
+        elif indoor > 27:
+            self.total_comfort_loss += (indoor - 27)
+        
+        # Track indoor temps for stats
+        self.indoor_temps.append(indoor)
+        
+        # Solar tracking
+        self.total_solar_generated += float(pv_generated)
+        self.total_solar_used += float(pv_used)
+        
+        # Battery tracking
+        self.total_battery_discharged += max(0.0, float(battery_discharged))
+        
+        # Peak load tracking
+        if total_load > self.peak_load:
+            self.peak_load = total_load
+            
+        self.temp_history.append({
+            "outdoor": round(float(outdoor_temp), 1),
+            "indoor": round(indoor, 1)
+        })
+        
+        self.energy_stack.append({
+            "pv": round(float(pv_used), 2),
+            "grid": round(max(0.0, float(grid_kw)), 2),
+            "battery": round(max(0.0, float(battery_discharged)), 2)
+        })
+    
+    def get_avg_indoor_temp(self):
+        return sum(self.indoor_temps) / len(self.indoor_temps) if self.indoor_temps else 25.0
+    
+    def get_min_indoor_temp(self):
+        return min(self.indoor_temps) if self.indoor_temps else 25.0
+    
+    def get_max_indoor_temp(self):
+        return max(self.indoor_temps) if self.indoor_temps else 25.0
+    
+    def get_solar_self_consumption_rate(self):
+        if self.total_solar_generated > 0:
+            return (self.total_solar_used / self.total_solar_generated) * 100
+        return 0.0
+
+
 class RealModelSimulation:
     """
     Simulation using REAL trained PPO and Hybrid models.
@@ -90,6 +165,12 @@ class RealModelSimulation:
         # Demo mode state (OFF by default - uses normal simulation)
         self.is_demo_mode = False
         self.current_scenario = "ideal"
+        self.paused = False  # Pause state for reports
+
+        
+        # Session statistics for demo report
+        self.stats_ppo = SessionStats()
+        self.stats_hybrid = SessionStats()
         
         # Environment config
         self.config = {
@@ -247,9 +328,94 @@ class RealModelSimulation:
         elif cumulative_kwh <= 400: return 5
         else: return 6
     
+    def _generate_final_report(self):
+        """Generate FINAL_REPORT packet at end of demo day (hour 23)"""
+        scenario = DEMO_SCENARIOS[self.current_scenario]
+        
+        # Build temperature chart data
+        temps_chart = []
+        for i in range(min(len(self.stats_ppo.temp_history), len(self.stats_hybrid.temp_history))):
+            temps_chart.append({
+                "hour": i,
+                "outdoor": self.stats_ppo.temp_history[i]["outdoor"],
+                "ppo": self.stats_ppo.temp_history[i]["indoor"],
+                "hybrid": self.stats_hybrid.temp_history[i]["indoor"]
+            })
+        
+        # Build energy stack chart data (for Hybrid)
+        energy_chart = []
+        for i, e in enumerate(self.stats_hybrid.energy_stack):
+            energy_chart.append({
+                "hour": i,
+                "pv": e["pv"],
+                "grid": e["grid"],
+                "battery": e["battery"]
+            })
+        
+        # Merge with regular data packet so UI stays updated, but override type
+        base_packet = self.get_data_packet()
+        report = {
+            **base_packet,
+            "type": "FINAL_REPORT",
+            "data": {
+                "scenario": scenario["name"],
+                "metrics": {
+                    # Cost metrics
+                    "ppo_bill": round(self.stats_ppo.total_bill, 0),
+                    "hybrid_bill": round(self.stats_hybrid.total_bill, 0),
+                    
+                    # Comfort metrics
+                    "ppo_comfort": round(self.stats_ppo.total_comfort_loss, 2),
+                    "hybrid_comfort": round(self.stats_hybrid.total_comfort_loss, 2),
+                    
+                    # Grid metrics
+                    "ppo_grid": round(self.stats_ppo.total_grid_import, 2),
+                    "hybrid_grid": round(self.stats_hybrid.total_grid_import, 2),
+                    
+                    # Solar metrics
+                    "solar_generated": round(self.stats_ppo.total_solar_generated, 2),
+                    "ppo_solar_used": round(self.stats_ppo.total_solar_used, 2),
+                    "hybrid_solar_used": round(self.stats_hybrid.total_solar_used, 2),
+                    "ppo_solar_self_consumption": round(self.stats_ppo.get_solar_self_consumption_rate(), 1),
+                    "hybrid_solar_self_consumption": round(self.stats_hybrid.get_solar_self_consumption_rate(), 1),
+                    
+                    # Battery metrics
+                    "ppo_battery_discharged": round(self.stats_ppo.total_battery_discharged, 2),
+                    "hybrid_battery_discharged": round(self.stats_hybrid.total_battery_discharged, 2),
+                    
+                    # Temperature metrics
+                    "ppo_avg_temp": round(self.stats_ppo.get_avg_indoor_temp(), 1),
+                    "hybrid_avg_temp": round(self.stats_hybrid.get_avg_indoor_temp(), 1),
+                    "ppo_min_temp": round(self.stats_ppo.get_min_indoor_temp(), 1),
+                    "hybrid_min_temp": round(self.stats_hybrid.get_min_indoor_temp(), 1),
+                    "ppo_max_temp": round(self.stats_ppo.get_max_indoor_temp(), 1),
+                    "hybrid_max_temp": round(self.stats_hybrid.get_max_indoor_temp(), 1),
+                    
+                    # Peak load metrics
+                    "ppo_peak_load": round(self.stats_ppo.peak_load, 2),
+                    "hybrid_peak_load": round(self.stats_hybrid.peak_load, 2),
+                },
+                "charts": {
+                    "temps": temps_chart,
+                    "energy_stack": energy_chart
+                }
+            }
+        }
+        
+        logger.info(f"📊 Generated FINAL_REPORT for scenario: {scenario['name']}")
+        
+        # NOTE: Don't reset stats here - keep cumulative values so dashboard 
+        # continues showing the final totals. Stats only reset when user 
+        # starts a NEW demo session via set_demo_mode().
+        
+        return report
+    
     def update(self):
         """Run one simulation step"""
         try:
+            if self.paused:
+                return None
+
             if self.done:
                 self.reset()
                 return self.get_data_packet()
@@ -301,6 +467,76 @@ class RealModelSimulation:
             self.done = done_ppo or done_hybrid
             self.step_count += 1
             
+            # --- ALWAYS Accumulate stats for cumulative bill tracking ---
+            # Get data from environment info
+            ppo_room_temps = self.info_ppo.get('room_temps', {})
+            hybrid_room_temps = self.info_hybrid.get('room_temps', {})
+            
+            ppo_indoor = np.mean(list(ppo_room_temps.values())) if ppo_room_temps else 25.0
+            hybrid_indoor = np.mean(list(hybrid_room_temps.values())) if hybrid_room_temps else 25.0
+            
+            # Step costs from environment
+            ppo_step_cost = self.info_ppo.get('step_cost', 0)
+            hybrid_step_cost = self.info_hybrid.get('step_cost', 0)
+            
+            # Grid import - per-step value
+            ppo_grid_step = self.info_ppo.get('step_grid_import', 0)
+            hybrid_grid_step = self.info_hybrid.get('step_grid_import', 0)
+            
+            # Battery discharge
+            ppo_battery_discharge = max(0, -action_ppo[0]) * 3.0
+            hybrid_battery_discharge = max(0, -action_hybrid[0]) * 3.0
+            
+            # Use demo scenario data if in demo mode, otherwise use environment data
+            if self.is_demo_mode:
+                scenario = DEMO_SCENARIOS[self.current_scenario]
+                outdoor_temp = scenario["temp_profile"][hour]
+                pv_available = scenario["pv_profile"][hour]
+            else:
+                outdoor_temp = getattr(self.env_ppo, 'temp_out', 30.0)
+                pv_available = self.env_ppo.pv_profile[hour] if hasattr(self.env_ppo, 'pv_profile') else 0
+            
+            # Estimate total load
+            ppo_total_load = ppo_grid_step + min(pv_available, 4.0)
+            hybrid_total_load = hybrid_grid_step + min(pv_available, 4.0)
+            
+            # Update stats (ALWAYS, not just demo mode)
+            self.stats_ppo.update(
+                step_bill=ppo_step_cost,
+                grid_kw=ppo_grid_step,
+                indoor_temp=ppo_indoor,
+                outdoor_temp=outdoor_temp,
+                pv_used=min(pv_available, 4.0),
+                battery_discharged=ppo_battery_discharge,
+                pv_generated=pv_available,
+                total_load=ppo_total_load
+            )
+            
+            self.stats_hybrid.update(
+                step_bill=hybrid_step_cost,
+                grid_kw=hybrid_grid_step,
+                indoor_temp=hybrid_indoor,
+                outdoor_temp=outdoor_temp,
+                pv_used=min(pv_available, 4.0),
+                battery_discharged=hybrid_battery_discharge,
+                pv_generated=pv_available,
+                total_load=hybrid_total_load
+            )
+            
+            # Demo mode: generate final report at end of day
+            if self.is_demo_mode and hour == 23:
+                try:
+                    logger.info("📊 Generating FINAL REPORT for hour 23...")
+                    report = self._generate_final_report()
+                    self.paused = True
+                    return report
+                except Exception as e:
+                    logger.error(f"❌ Report generation FAILED: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    # Continue without pausing if report fails, preventing getting stuck
+                    self.paused = False
+            
             return self.get_data_packet()
         except Exception as e:
             logger.error(f"❌ Error in update(): {e}")
@@ -348,8 +584,13 @@ class RealModelSimulation:
         # PPO agent data
         ppo_actions = self._parse_device_states(self.info_ppo)
         ppo_comfort = self._calculate_comfort_score(ppo_room_temps)
+        
+        # ALWAYS use cumulative stats for bill tracking (works for both demo and normal mode)
+        ppo_bill = int(self.stats_ppo.total_bill)
+        hybrid_bill = int(self.stats_hybrid.total_bill)
+        
         ppo_data = {
-            "bill": int(self.env_ppo.total_cost),
+            "bill": ppo_bill,
             "soc": float(round(float(self.env_ppo.soc) * 100, 1)),
             "grid": float(round(float(self.env_ppo.cumulative_import_kwh - self.env_ppo.cumulative_export_kwh), 2)),
             "actions": ppo_actions,
@@ -363,7 +604,7 @@ class RealModelSimulation:
         hybrid_actions = self._parse_device_states(self.info_hybrid)
         hybrid_comfort = self._calculate_comfort_score(hybrid_room_temps)
         hybrid_data = {
-            "bill": int(self.env_hybrid.total_cost),
+            "bill": hybrid_bill,
             "soc": float(round(float(self.env_hybrid.soc) * 100, 1)),
             "grid": float(round(float(self.env_hybrid.cumulative_import_kwh - self.env_hybrid.cumulative_export_kwh), 2)),
             "actions": hybrid_actions,
@@ -420,9 +661,13 @@ class RealModelSimulation:
     def set_demo_mode(self, enabled: bool, scenario: str = None):
         """Toggle demo mode and optionally change scenario"""
         self.is_demo_mode = enabled
+        self.paused = False
         if scenario and scenario in DEMO_SCENARIOS:
             self.current_scenario = scenario
         if enabled:
+            # Reset stats for fresh demo session
+            self.stats_ppo.reset()
+            self.stats_hybrid.reset()
             self.reset()  # Reset to hour 0 when enabling demo
             logger.info(f"🎬 Demo mode ENABLED - Scenario: {DEMO_SCENARIOS[self.current_scenario]['name']}")
         else:
@@ -457,6 +702,7 @@ class RealModelSimulation:
         
         self.step_count = 0
         self.done = False
+        self.paused = False
         self.info_ppo = {}
         self.info_hybrid = {}
         
@@ -568,14 +814,12 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("📤 Sent initial data packet")
         
         while True:
-            # Wait before next update
-            await asyncio.sleep(1.0)
-            
-            # Update and get data
-            data = sim.update()
-            
-            # Send to client
-            await websocket.send_json(data)
+            # Just keep connection alive and listen for any messages (e.g. manual control)
+            # This prevents the handler from exiting and closing the socket
+            data = await websocket.receive_text()
+            # Optional: Handle manual control messages here if needed
+            # For now just log heartbeat or ignore
+            # logger.debug(f"Received from client: {data}")
             
     except WebSocketDisconnect:
         logger.info(f"❌ Client disconnected normally")
@@ -600,6 +844,42 @@ async def startup_event():
     logger.info("🌐 HTTP Poll: http://localhost:8000/data")
     logger.info("🔄 Reload Models: http://localhost:8000/reload-models")
     logger.info("=" * 60)
+    
+    # Start background simulation loop
+    asyncio.create_task(simulation_background_loop())
+
+async def simulation_background_loop():
+    """Independent simulation loop that broadcasts updates to all clients"""
+    logger.info("🕰️ Background simulation loop started")
+    while True:
+        try:
+            await asyncio.sleep(1.0)
+            
+            # Skip if paused
+            if sim.paused:
+                continue
+                
+            # Update simulation
+            data = sim.update()
+            
+            # Broadcast if we have data
+            if data and connected_clients:
+                # Broadcast to all connected clients
+                disconnected = []
+                for client in connected_clients:
+                    try:
+                        await client.send_json(data)
+                    except Exception:
+                        disconnected.append(client)
+                
+                # Cleanup disconnected
+                for client in disconnected:
+                    if client in connected_clients:
+                        connected_clients.remove(client)
+                        
+        except Exception as e:
+            logger.error(f"❌ Error in background loop: {e}")
+            await asyncio.sleep(1.0)  # Prevent tight loop on error
 
 
 if __name__ == "__main__":

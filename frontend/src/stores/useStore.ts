@@ -50,6 +50,45 @@ export interface SimulationPacket {
     hybrid: AgentData;
 }
 
+// FINAL_REPORT data structure from backend
+export interface FinalReportData {
+    scenario: string;
+    metrics: {
+        // Cost metrics
+        ppo_bill: number;
+        hybrid_bill: number;
+        // Comfort metrics
+        ppo_comfort: number;
+        hybrid_comfort: number;
+        // Grid metrics
+        ppo_grid: number;
+        hybrid_grid: number;
+        // Solar metrics
+        solar_generated: number;
+        ppo_solar_used: number;
+        hybrid_solar_used: number;
+        ppo_solar_self_consumption: number;
+        hybrid_solar_self_consumption: number;
+        // Battery metrics
+        ppo_battery_discharged: number;
+        hybrid_battery_discharged: number;
+        // Temperature metrics
+        ppo_avg_temp: number;
+        hybrid_avg_temp: number;
+        ppo_min_temp: number;
+        hybrid_min_temp: number;
+        ppo_max_temp: number;
+        hybrid_max_temp: number;
+        // Peak load
+        ppo_peak_load: number;
+        hybrid_peak_load: number;
+    };
+    charts: {
+        temps: Array<{ hour: number; outdoor: number; ppo: number; hybrid: number }>;
+        energy_stack: Array<{ hour: number; pv: number; grid: number; battery: number }>;
+    };
+}
+
 // --- 2. Device State for 3D Visualization ---
 
 export interface Device {
@@ -105,6 +144,12 @@ interface AppState {
     isDemoMode: boolean;
     currentScenario: 'ideal' | 'erratic' | 'heatwave';
     setDemoMode: (enabled: boolean, scenario?: string) => Promise<void>;
+
+    // Demo Report
+    reportData: FinalReportData | null;
+    showReport: boolean;
+    setShowReport: (show: boolean) => void;
+    setReportData: (data: FinalReportData) => void;
 }
 
 const INITIAL_DEVICES: Record<string, Device> = {
@@ -347,4 +392,10 @@ export const useStore = create<AppState>((set, get) => ({
             console.error('Failed to set demo mode:', e);
         }
     },
+
+    // Demo Report
+    reportData: null,
+    showReport: false,
+    setShowReport: (show) => set({ showReport: show }),
+    setReportData: (data) => set({ reportData: data, showReport: true }),  // Auto-show when data received
 }));
