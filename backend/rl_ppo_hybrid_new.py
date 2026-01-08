@@ -177,7 +177,8 @@ def main():
     total_steps = episodes * T
 
     vec_env = DummyVecEnv([make_env()])
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=False)
+    vec_env = DummyVecEnv([make_env()])
+    # vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=False) # REMOVED for IL compatibility
 
     reward_logger = EpisodeRewardLogger()
     progress = ProgressPrintCallback(total_steps)
@@ -193,6 +194,7 @@ def main():
         clip_range=0.2,
         ent_coef=0.01,
         vf_coef=0.5,
+        policy_kwargs=dict(net_arch=[256, 256]), # MATCHING train_il_bc.py
         verbose=0,
     )
 

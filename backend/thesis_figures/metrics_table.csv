@@ -1,9 +1,9 @@
 Metric,PPO Agent,Hybrid Agent,Improvement
-Total Cost (VND),"26,292","3,953",-85.0%
-Total Grid Import (kWh),13.25,1.99,-85.0%
-Avg Indoor Temp (°C),26.6,23.8,-
-Min Indoor Temp (°C),24.3,20.9,-
-Max Indoor Temp (°C),29.3,24.9,-
-Comfort Violation Hours,11,7,-
-Avg Battery SOC (%),10.4,10.4,-
+Total Cost (VND),"95,168","88,325",-7.2%
+Total Grid Import (kWh),47.97,44.52,-7.2%
+Avg Indoor Temp (°C),26.5,26.2,-
+Min Indoor Temp (°C),24.3,24.3,-
+Max Indoor Temp (°C),29.1,28.6,-
+Comfort Violation Hours,10,9,-
+Avg Battery SOC (%),10.4,35.3,-
 Solar Self-Consumption (%),0.0,0.0,-

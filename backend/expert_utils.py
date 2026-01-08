@@ -1,81 +1,114 @@
-# backend/expert_utils.py
-"""
-Centralized Expert Logic for Smart Home RL
-FIXED: Strict AC OFF when cold to prevent over-cooling.
-"""
-
 import numpy as np
-from device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, THERMAL_CONSTANTS, DEVICE_CONFIG
 
+def calculate_expert_action(obs, hour, outdoor_temp, pv_gen):
+    """
+    Calculates a baseline action based on expert rules.
+    
+    Args:
+        obs: Current observation from environment (unused directly here, but good for signature)
+        hour (int): Current hour of day (0-23)
+        outdoor_temp (float): Outdoor temperature in Celsius
+        pv_gen (float): PV generation in kW (or whatever unit env uses, approx)
+        
+    Returns:
+        np.array: A 7-dimensional action vector [-1, 1]
+        [Battery, AC1, AC2, AC3, EV, WM, DW]
+    """
+    # Initialize zero action (idle)
+    action = np.zeros(7, dtype=np.float32)
+    
+    # --- 1. Battery Rules ---
+    # Charge during high solar (e.g., > 3.0 kW)
+    if pv_gen > 3.0:
+        action[0] = 0.8  # Strong charge
+    # Discharge during night (no sun) or peak hours (17-23 usually)
+    # Simple heuristic: Discharge if dark or evening
+    elif hour >= 18 or hour < 6:
+        action[0] = -0.6 # Moderate discharge
+    else:
+        action[0] = 0.0  # Idle/Float
+        
+    # --- 2. AC Rules ---
+    # Only run AC if really hot
+    if outdoor_temp > 32.0:
+        action[1] = 1.0 # AC Living ON
+        action[2] = 0.5 # AC Master Eco
+        # AC Bed2 (index 3) optional, keep 0
+    elif outdoor_temp > 30.0:
+        action[1] = 0.7 # AC Living Eco
+    
+    # --- 3. Shiftable Loads (WM, DW, EV) ---
+    # Expert rules for these are tricky without knowing state (remaining tasks).
+    # Ideally, we let the RL handle the precise timing, or simple rules:
+    # Run WM/DW during day if solar is good?
+    # For now, let's leave them 0 (let RL decide entirely, or mix with 0)
+    # Or provide a safe default like "Don't run unless urgent" (which is 0)
+    
+    # EV: Charge if solar is high?
+    if pv_gen > 4.0:
+        action[4] = 0.5
+        
+    return action
 
-def is_room_occupied(room, hour):
-    """Check if room is occupied at given hour"""
-    for start, end in ROOM_OCCUPANCY_HOURS.get(room, []):
-        if start <= end and start <= hour < end:
-            return True
-        if start > end and (hour >= start or hour < end):
-            return True
-    return False
+def get_residual_action(model, obs, hour, outdoor_temp, pv_gen, w_rl=0.1):
+    """
+    Implements Residual RL: Action = (1 - w) * Expert + w * RL
+    
+    Args:
+        model: Loaded PPO model
+        obs: Environment observation
+        hour: Current hour
+        outdoor_temp: Outdoor temp
+        pv_gen: PV generation
+        w_rl (float): Weight for RL component (0.0 to 1.0)
+        
+    Returns:
+        np.array: Final clipped action
+    """
+    # 1. Expert Action
+    expert_act = calculate_expert_action(obs, hour, outdoor_temp, pv_gen)
+    
+    # 2. RL Action
+    rl_act, _ = model.predict(obs, deterministic=True)
+    # Ensure flat array
+    rl_act = np.array(rl_act).flatten()
+    
+    # 3. Residual Combination
+    # Formula: Final = (1 - w) * Expert + w * RL
+    # This means we trust Expert by default, and let RL nudge it.
+    final_act = (1 - w_rl) * expert_act + w_rl * rl_act
+    
+    # 4. Safety Clipping
+    final_act = np.clip(final_act, -1.0, 1.0)
+    
+    return final_act
 
+# Alias for compatibility with train_il_bc.py
+# Note: train_il_bc expects (obs, hour, price), but calculate_expert_action expects (obs, hour, outdoor_temp, pv_gen).
+# We need an adapter wrapper.
 
 def expert_heuristic_action(obs, hour, price):
     """
-    FIXED: Ensure AC is strictly OFF (-1.0) when cold.
+    Adapter to match signature expected by train_il_bc.py:
+    func(obs, hour, price) -> action
+    
+    We need to extract outdoor_temp and pv_gen from obs or heuristics.
+    SmartHomeEnv Observation structure:
+    [0] soc, [1] pv, [2] must, [3] fut_pv, [4]-[5] time_sin/cos, [6] n_home, [7] temp_out, ...
+    So temp_out is obs[7], pv is obs[1]
     """
-    action = np.zeros(7, dtype=np.float32)
-    
-    soc = obs[0]
-    n_home = obs[6]
-    room_temps = obs[8:11]
-    ev_soc = obs[12]
-    
-    # [0] Battery: Aggressive arbitrage
-    if price[hour] < 0.12:
-        action[0] = 1.0 if soc < 0.9 else 0.0  # Charge full speed
-    elif price[hour] > 0.20:
-        action[0] = -1.0 if soc > 0.2 else 0.0  # Discharge full speed
-    else:
-        action[0] = 0.0
-    
-    # [1-3] ACs: Strict Comfort Logic
-    comfort_temp = THERMAL_CONSTANTS["comfort_temp"]
-    for idx, room in enumerate(["living", "master", "bed2"]):
-        if is_room_occupied(room, hour) and n_home > 0:
-            temp_diff = room_temps[idx] - comfort_temp
-            
-            if temp_diff > 1.0:  # > 26°C -> Cooling
-                # Proportional but capped at 1.0
-                action[1 + idx] = min(1.0, temp_diff / 3.0)
-            elif temp_diff < -0.5:  # < 24.5°C -> STRICT OFF
-                # CRITICAL FIX: Was -0.5 (25%), now -1.0 (0%)
-                action[1 + idx] = -1.0 
-            else:
-                # Maintain range [24.5, 26]: Run gentle low power
-                # -0.2 maps to ~40% capacity (sufficient to maintain)
-                action[1 + idx] = -0.2 
-        else:
-            action[1 + idx] = -1.0  # Off if empty
-    
-    # [4] EV
-    deadline = EV_CONFIG["deadline_hour"]
-    target_soc = EV_CONFIG["min_target_soc"]
-    hours_left = (deadline - hour) % 24
-    if hours_left == 0:
-        hours_left = 24
-    
-    if (hour >= 22 or hour < 5) and ev_soc < 0.95:
-        action[4] = 1.0
-    elif ev_soc < target_soc and hours_left < 4:
-        action[4] = 1.0
-    else:
-        action[4] = -1.0
-    
-    # [5-6] Shiftable
-    if price[hour] < 0.15:  # Run when cheap
-        action[5] = 1.0
-        action[6] = 1.0
-    else:
-        action[5] = -1.0
-        action[6] = -1.0
-    
-    return np.clip(action, -1, 1)
+    try:
+        pv_gen = obs[1] * 10.0 # Un-normalize if needed? Or assumes raw? 
+        # In collecting data, env.reset() returns obs. 
+        # SmartHomeEnv _get_obs returns [soc, pv, ...] 
+        # PV in obs is direct from pv_profile.
+        # Temp is obs[7].
+        
+        outdoor_temp = obs[7]
+        # Note: If standardized, these might be scaled. 
+        # But SmartHomeEnv usually returns physical values in _get_obs unless wrapped.
+        
+        return calculate_expert_action(obs, hour, outdoor_temp, pv_gen)
+    except Exception as e:
+        print(f"Error in adapter: {e}")
+        return np.zeros(7)
