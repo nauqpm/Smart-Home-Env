@@ -4,8 +4,8 @@ import logging
 from typing import Dict, Any
 
 # Import Environment logic
-from smart_home_env import SmartHomeEnv, calculate_vietnam_tiered_bill
-from device_config import DEVICE_CONFIG, ACTION_INDICES
+from .smart_home_env import SmartHomeEnv
+from .device_config import DEVICE_CONFIG, ACTION_INDICES
 
 logger = logging.getLogger('SimulationCore')
 logger.setLevel(logging.INFO)

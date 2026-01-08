@@ -14,17 +14,17 @@ import torch.nn as nn
 import torch.optim as optim
 from datetime import datetime, timedelta
 
-from smart_home_env import SmartHomeEnv
-from device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, THERMAL_CONSTANTS
-from expert_utils import expert_heuristic_action  # <--- Centralized Import
+from backend.simulation.smart_home_env import SmartHomeEnv
+from backend.simulation.device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, THERMAL_CONSTANTS
+from backend.algorithms.expert_utils import expert_heuristic_action  # <--- Centralized Import
 
 try:
-    from milp_expert import build_and_solve_milp
+    from backend.algorithms.milp_expert import build_and_solve_milp
     HAS_MILP = True
 except Exception:
     HAS_MILP = False
 
-from lbwo_solver import LBWOSolver
+from backend.algorithms.lbwo_solver import LBWOSolver
 
 SEED = 42
 random.seed(SEED)

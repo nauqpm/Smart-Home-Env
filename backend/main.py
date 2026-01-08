@@ -89,8 +89,8 @@ ENV_SI_DEVS = [
 def load_models():
     # Load PPO Models
     base_path = os.path.dirname(os.path.abspath(__file__))
-    ppo_path = os.path.join(base_path, "ppo_smart_home.zip")
-    hybrid_path = os.path.join(base_path, "ppo_hybrid_smart_home.zip")
+    ppo_path = os.path.join(base_path, "models", "ppo_smart_home.zip")
+    hybrid_path = os.path.join(base_path, "models", "ppo_hybrid_smart_home.zip")
     
     if os.path.exists(ppo_path):
         models['ppo'] = PPO.load(ppo_path)

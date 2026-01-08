@@ -1,0 +1,15 @@
+
+========================================
+KẾT QUẢ SO SÁNH TRỰC TIẾP (PYTHON)
+========================================
+💰 Hóa đơn (Bill):
+   PPO: 92423.49 vs Hybrid: 89707.97
+   => Hybrid RẺ HƠN 2.94% 🏆
+
+🎯 Điểm thưởng (Reward - Bao gồm cả tiện nghi):
+   PPO: -227.75 vs Hybrid: -48.43
+   => Hybrid TỐT HƠN
+
+🔍 Phân tích Battery SOC trung bình:
+   PPO: 0.10
+   Hybrid: 0.35

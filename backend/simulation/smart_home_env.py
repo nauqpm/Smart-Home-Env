@@ -6,7 +6,7 @@ from typing import Dict
 import gymnasium as gym
 from gymnasium import spaces
 
-from device_config import (
+from .device_config import (
     DEVICE_CONFIG, ACTION_INDICES, ROOM_OCCUPANCY_HOURS,
     THERMAL_CONSTANTS, EV_CONFIG
 )

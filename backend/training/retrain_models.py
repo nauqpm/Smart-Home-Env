@@ -21,9 +21,10 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 
 import gymnasium as gym
-from smart_home_env import SmartHomeEnv
-from device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, DEVICE_CONFIG, THERMAL_CONSTANTS
-from expert_utils import expert_heuristic_action, is_room_occupied
+# Updated imports for new structure
+from backend.simulation.smart_home_env import SmartHomeEnv
+from backend.simulation.device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, DEVICE_CONFIG, THERMAL_CONSTANTS
+from backend.algorithms.expert_utils import expert_heuristic_action, is_room_occupied
 
 # =====================================================
 # Constants
