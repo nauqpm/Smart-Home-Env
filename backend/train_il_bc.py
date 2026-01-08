@@ -52,7 +52,8 @@ DEFAULT_CFG = {
 # ------------------------------
 def get_env_inputs():
     price = np.array([0.1] * 6 + [0.15] * 6 + [0.25] * 6 + [0.18] * 6)
-    pv = np.zeros(24)
+    # Match "Ideal Day" profile from ws_server.py to ensures expert sees solar!
+    pv = np.array([0, 0, 0, 0, 0, 0, 0.2, 0.8, 1.5, 2.5, 3.2, 3.8, 4.0, 3.8, 3.0, 2.0, 1.0, 0.3, 0, 0, 0, 0, 0, 0])
     return price, pv
 
 

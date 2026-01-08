@@ -115,7 +115,7 @@ export default function Overlay() {
                                 onClick={async () => {
                                     try {
                                         resetSimulation(); // Clear local state
-                                        await fetch('http://localhost:8000/reset');
+                                        await fetch('http://localhost:8012/reset');
                                     } catch (e) {
                                         console.error('Reset failed:', e);
                                     }

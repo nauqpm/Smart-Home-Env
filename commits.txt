@@ -1,7 +1,0 @@
-﻿27be6b18 Feat: Implement initial smart home simulation environment with a WebSocket server and a React frontend for visualization and control.
-d91cd451 change model depend on env
-c852e0ee change model depend on env
-451ee6b4 push format
-2dbb5814 Change: from Aggregate Load to Device-Specific Load
-956f3197 Add: add more lights in model
-a5485c30 Change: adjust the 3d model

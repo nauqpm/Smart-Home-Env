@@ -4,7 +4,7 @@ import { useStore } from './stores/useStore';
 import './App.css';
 
 // WebSocket URL
-const WS_URL = 'ws://localhost:8000/ws';
+const SOCKET_URL = 'ws://localhost:8012/ws';
 
 function App() {
   const { updateSimData, setIsConnected, isConnected, setWsRef, setReportData } = useStore();
@@ -21,10 +21,10 @@ function App() {
     const connect = () => {
       // Only log detailed info for first few attempts to reduce console spam
       if (reconnectAttempts < 3) {
-        console.log('📡 Connecting to WebSocket...', WS_URL);
+        console.log('📡 Connecting to WebSocket...', SOCKET_URL);
       }
 
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(SOCKET_URL);
 
       ws.onopen = () => {
         console.log('✅ WebSocket connected');

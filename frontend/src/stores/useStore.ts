@@ -379,7 +379,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ isDemoMode: enabled, currentScenario: newScenario as any });
 
         try {
-            await fetch('http://localhost:8000/set_mode', {
+            const response = await fetch('http://localhost:8012/set_mode', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ demo_mode: enabled, scenario: newScenario })

@@ -98,7 +98,7 @@ def expert_heuristic_action(obs, hour, price):
     So temp_out is obs[7], pv is obs[1]
     """
     try:
-        pv_gen = obs[1] * 10.0 # Un-normalize if needed? Or assumes raw? 
+        pv_gen = obs[1] # Raw kW value from env 
         # In collecting data, env.reset() returns obs. 
         # SmartHomeEnv _get_obs returns [soc, pv, ...] 
         # PV in obs is direct from pv_profile.

@@ -16,7 +16,8 @@ import uvicorn
 # Import environment and config
 from smart_home_env import SmartHomeEnv
 from device_config import DEVICE_CONFIG, ACTION_INDICES, ROOM_OCCUPANCY_HOURS
-from rl_ppo_hybrid_new import HybridAgentWrapper
+from device_config import DEVICE_CONFIG, ACTION_INDICES, ROOM_OCCUPANCY_HOURS
+# from rl_ppo_hybrid_new import HybridAgentWrapper # REMOVED: Using pure PPO model
 
 # Try to import stable_baselines3
 try:
@@ -240,8 +241,7 @@ class RealModelSimulation:
                 logger.warning(f"⚠️ PPO model not found: {PPO_MODEL_PATH}")
             
             if os.path.exists(HYBRID_MODEL_PATH):
-                hybrid_base_model = PPO.load(HYBRID_MODEL_PATH)
-                self.hybrid_wrapper = HybridAgentWrapper(hybrid_base_model)  # Only 1 arg!
+                self.hybrid_model = PPO.load(HYBRID_MODEL_PATH)
                 logger.info(f"✅ Loaded Hybrid model from {HYBRID_MODEL_PATH}")
             else:
                 logger.warning(f"⚠️ Hybrid model not found: {HYBRID_MODEL_PATH}")
@@ -257,7 +257,7 @@ class RealModelSimulation:
                     self.use_real_models = False
                     return
             
-            if self.ppo_model is not None or self.hybrid_wrapper is not None:
+            if self.ppo_model is not None or self.hybrid_model is not None:
                 self.use_real_models = True
                 logger.info("🚀 REAL MODEL MODE ENABLED")
             else:
@@ -444,15 +444,20 @@ class RealModelSimulation:
                 )
             
             # --- GET HYBRID ACTION ---
-            # NOTE: Rules are now baked into Hybrid model during training
-            # No need for HybridAgentWrapper rules - just use direct predict
-            if self.use_real_models and self.hybrid_wrapper is not None:
-                # Use REAL trained Hybrid model (rules already applied during training)
-                action_hybrid, _ = self.hybrid_wrapper.model.predict(
-                    self.obs_hybrid, 
-                    deterministic=True
-                )
+            # True Hybrid: PPO + Imitation Learning (Pure Model)
+            if self.use_real_models and self.hybrid_model is not None:
+                if self.is_demo_mode and self.obs_hybrid is not None:
+                    # print(f"DEBUG OBS HYBRID: {self.obs_hybrid}")
+                    action_hybrid, _ = self.hybrid_model.predict(self.obs_hybrid)
+                else:
+                    action_hybrid, _ = self.hybrid_model.predict(self.obs_hybrid)
                 action_hybrid = np.array(action_hybrid, dtype=np.float32).flatten()
+                # DEBUG: Log PV and Action to console
+                try:
+                    pv_obs = self.obs_hybrid[1] # Index 1 is PV
+                    logger.info(f"[Step {hour}] Hybrid PV(obs): {pv_obs:.2f}, Act[0](Bat): {action_hybrid[0]:.2f}, SOC: {self.env_hybrid.soc:.2f}")
+                except:
+                    pass
                 logger.debug(f"[Hybrid] Real model action: {action_hybrid}")
             else:
                 # Fallback to heuristic
@@ -669,6 +674,7 @@ class RealModelSimulation:
             self.stats_ppo.reset()
             self.stats_hybrid.reset()
             self.reset()  # Reset to hour 0 when enabling demo
+            print(f"DEBUG: Demo mode ENABLED {scenario}")
             logger.info(f"🎬 Demo mode ENABLED - Scenario: {DEMO_SCENARIOS[self.current_scenario]['name']}")
         else:
             logger.info("🔄 Demo mode DISABLED - Returning to normal simulation")
@@ -681,16 +687,32 @@ class RealModelSimulation:
         scenario = DEMO_SCENARIOS[self.current_scenario]
         hour = self.step_count % 24
         
-        demo_pv = scenario["pv_profile"][hour]
-        demo_temp = scenario["temp_profile"][hour]
-        
-        # Override PV profile in environments
+        # FIX: Replace ENTIRE profile to ensure next_obs (hour+1) sees correct data
+        # not just the current hour.
         for env in [self.env_ppo, self.env_hybrid]:
-            if hasattr(env, 'pv_profile') and len(env.pv_profile) > hour:
-                env.pv_profile[hour] = demo_pv
-            # Override temperature in load_schedules if available
-            if hasattr(env, 'load_schedules') and len(env.load_schedules) > hour:
-                env.load_schedules[hour]['temp_out'] = demo_temp
+            env.pv_profile = list(scenario["pv_profile"]) # Copy full list
+            env.temp_profile = list(scenario["temp_profile"]) # Copy full list
+            
+            # Also update load_schedules if they exist
+            if hasattr(env, 'load_schedules'):
+                for h in range(24):
+                     env.load_schedules[h]['temp_out'] = scenario["temp_profile"][h]
+        
+        # CRITICAL FIX: Update the *current* observation to match the injected data
+        # The agent makes a decision based on self.obs_*, which was generated in the prev step
+        # If we just changed the environment, the old obs is stale.
+        # Index 1 is PV, Index 7 is Temp
+        
+        current_pv = scenario["pv_profile"][hour]
+        current_temp = scenario["temp_profile"][hour]
+        
+        # Update PPO obs
+        self.obs_ppo[1] = current_pv
+        self.obs_ppo[7] = current_temp
+        
+        # Update Hybrid obs
+        self.obs_hybrid[1] = current_pv
+        self.obs_hybrid[7] = current_temp
     
     def reset(self):
         """Reset simulation for new day"""
@@ -739,7 +761,7 @@ async def health():
         "status": "healthy",
         "model_mode": "real" if sim.use_real_models else "heuristic",
         "ppo_loaded": sim.ppo_model is not None,
-        "hybrid_loaded": sim.hybrid_wrapper is not None
+        "hybrid_loaded": sim.hybrid_model is not None
     }
 
 
@@ -793,7 +815,7 @@ async def reload_models():
         "status": "reloaded",
         "model_mode": "real" if sim.use_real_models else "heuristic",
         "ppo_loaded": sim.ppo_model is not None,
-        "hybrid_loaded": sim.hybrid_wrapper is not None
+        "hybrid_loaded": sim.hybrid_model is not None
     }
 
 
@@ -838,11 +860,11 @@ async def startup_event():
     logger.info("=" * 60)
     logger.info(f"📊 Model Mode: {'REAL AI' if sim.use_real_models else 'HEURISTIC FALLBACK'}")
     logger.info(f"   PPO Model: {'✅ Loaded' if sim.ppo_model else '❌ Not found'}")
-    logger.info(f"   Hybrid Model: {'✅ Loaded' if sim.hybrid_wrapper else '❌ Not found'}")
+    logger.info(f"   Hybrid Model: {'✅ Loaded' if sim.hybrid_model else '❌ Not found'}")
     logger.info("=" * 60)
-    logger.info("📡 WebSocket: ws://localhost:8000/ws")
-    logger.info("🌐 HTTP Poll: http://localhost:8000/data")
-    logger.info("🔄 Reload Models: http://localhost:8000/reload-models")
+    logger.info("📡 WebSocket: ws://localhost:8001/ws")
+    logger.info("🌐 HTTP Poll: http://localhost:8001/data")
+    logger.info("🔄 Reload Models: http://localhost:8001/reload-models")
     logger.info("=" * 60)
     
     # Start background simulation loop
@@ -883,4 +905,4 @@ async def simulation_background_loop():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8012)
