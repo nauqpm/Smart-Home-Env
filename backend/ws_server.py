@@ -544,11 +544,16 @@ class RealModelSimulation:
             
             # Demo mode: generate final report at end of day
             if self.is_demo_mode and hour == 23:
-                # [MODIFIED] Loop demo instead of pausing with report
-                logger.info("� End of Demo Day. Looping...")
-                # self.paused = True 
-                # return self._generate_final_report()
-                pass # Continue to get_data_packet which will return hour 23 data, then next step resets.
+                try:
+                    logger.info("📊 Generating FINAL REPORT for hour 23...")
+                    report = self._generate_final_report()
+                    self.paused = True  # PAUSE to show report
+                    return report
+                except Exception as e:
+                    logger.error(f"❌ Report generation FAILED: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    self.paused = False
             
             return self.get_data_packet()
         except Exception as e:
