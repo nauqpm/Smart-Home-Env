@@ -80,7 +80,13 @@ const getTempColor = (temp: number | undefined): string => {
 
 // --- Main Component ---
 export default function ComparisonDashboard() {
-    const { simData, history, currentViewMode, setViewMode, isConnected } = useStore();
+    const {
+        simData,
+        history,
+        currentViewMode,
+        setViewMode,
+        isConnected,
+    } = useStore();
 
     if (!simData) {
         return (
@@ -140,7 +146,7 @@ export default function ComparisonDashboard() {
             </div>
 
             {/* === CONTROL PANEL: View Mode Toggle === */}
-            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                     style={buttonStyle(currentViewMode === 'ppo')}
                     onClick={() => setViewMode('ppo')}

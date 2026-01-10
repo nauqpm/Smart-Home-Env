@@ -9,7 +9,8 @@ export default function Overlay() {
         devices, isNight, batterySOC, gridImport, totalBill, weather, n_home,
         simData, currentViewMode, setViewMode, toggleNight, isConnected, resetSimulation,
         manualOverride, toggleManualMode, toggleDevice,
-        isDemoMode, currentScenario, setDemoMode
+        isDemoMode, currentScenario, setDemoMode,
+        isPaused, pauseSimulation, resumeSimulation, resetAndRestart,
     } = useStore();
 
     const [activeTab, setActiveTab] = useState<'dashboard' | 'devices'>('dashboard');
@@ -215,6 +216,44 @@ export default function Overlay() {
                                 <option value="erratic">🌦️ Erratic Day</option>
                                 <option value="heatwave">🔥 Heatwave</option>
                             </select>
+                        </div>
+
+                        {/* Simulation Control Buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <button
+                                onClick={() => isPaused ? resumeSimulation() : pauseSimulation()}
+                                style={{
+                                    padding: '5px 12px',
+                                    borderRadius: 6,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    fontSize: 11,
+                                    background: isPaused ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                    color: isPaused ? '#22c55e' : '#ef4444',
+                                    transition: 'all 0.2s ease',
+                                }}
+                                title={isPaused ? 'Resume simulation' : 'Pause simulation'}
+                            >
+                                {isPaused ? '▶️ Resume' : '⏸️ Pause'}
+                            </button>
+                            <button
+                                onClick={() => resetAndRestart()}
+                                style={{
+                                    padding: '5px 12px',
+                                    borderRadius: 6,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    fontSize: 11,
+                                    background: 'rgba(99, 102, 241, 0.2)',
+                                    color: '#6366f1',
+                                    transition: 'all 0.2s ease',
+                                }}
+                                title="Reset simulation to hour 0"
+                            >
+                                🔄 Reset
+                            </button>
                         </div>
                     </div>
 

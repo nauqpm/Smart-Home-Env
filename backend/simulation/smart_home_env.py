@@ -122,6 +122,30 @@ class SmartHomeEnv(gym.Env):
         self._reset_internal()
 
     # -------------------------------------------------
+    def get_current_day_forecast(self):
+        """
+        Returns full 24h forecast for the current day simulation.
+        Used by Plan-ahead Optimizers (like LBWO).
+        """
+        # Since this env simulates exactly 24 steps (one day) usually,
+        # we return the full profile arrays.
+        # If sim_steps > 24, we should return slice [self.t : self.t + 24] or similar.
+        # For simplicity in this project context (24h episodes), we return the full input arrays.
+        
+        load_profile = np.array([s["must_run"] for s in self.load_schedules])
+        # Note: price_profile_input might be None if not passed, handle gracefully?
+        # In this project, it's always passed by main/server.
+        prices = self.price_profile_input if self.price_profile_input is not None else np.zeros(self.sim_steps)
+        
+        return {
+            "price_buy": np.array(prices),
+            "price_sell": np.zeros_like(prices), # Export revenue disabled in Env
+            "load": load_profile,
+            "pv": self.pv_profile,
+            "wind": np.zeros(self.sim_steps) # No wind data yet
+        }
+
+    # -------------------------------------------------
     def _reset_internal(self):
         self.times = pd.date_range(
             self.sim_start, periods=self.sim_steps, freq=self.sim_freq

@@ -150,6 +150,12 @@ interface AppState {
     showReport: boolean;
     setShowReport: (show: boolean) => void;
     setReportData: (data: FinalReportData) => void;
+
+    // Simulation Control
+    isPaused: boolean;
+    pauseSimulation: () => void;
+    resumeSimulation: () => void;
+    resetAndRestart: () => Promise<void>;
 }
 
 const INITIAL_DEVICES: Record<string, Device> = {
@@ -398,4 +404,45 @@ export const useStore = create<AppState>((set, get) => ({
     showReport: false,
     setShowReport: (show) => set({ showReport: show }),
     setReportData: (data) => set({ reportData: data, showReport: true }),  // Auto-show when data received
+
+    // Simulation Control
+    isPaused: false,
+    pauseSimulation: () => {
+        const { wsRef } = get();
+        if (wsRef && wsRef.readyState === WebSocket.OPEN) {
+            wsRef.send(JSON.stringify({ type: 'pause' }));
+        }
+        set({ isPaused: true });
+    },
+    resumeSimulation: () => {
+        const { wsRef } = get();
+        if (wsRef && wsRef.readyState === WebSocket.OPEN) {
+            wsRef.send(JSON.stringify({ type: 'resume' }));
+        }
+        set({ isPaused: false });
+    },
+    resetAndRestart: async () => {
+        const { wsRef, isDemoMode, currentScenario } = get();
+        // Reset local state
+        get().resetSimulation();
+        set({ isPaused: false });
+
+        // Tell backend to reset
+        if (wsRef && wsRef.readyState === WebSocket.OPEN) {
+            wsRef.send(JSON.stringify({ type: 'reset' }));
+        }
+
+        // Re-trigger demo mode if active
+        if (isDemoMode) {
+            try {
+                await fetch('http://localhost:8012/set_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ demo_mode: true, scenario: currentScenario })
+                });
+            } catch (e) {
+                console.error('Failed to restart demo:', e);
+            }
+        }
+    },
 }));

@@ -1,114 +1,168 @@
-import numpy as np
+"""
+Expert Utilities for Smart Home Energy Management
+Provides expert heuristic actions for AC, EV, Battery control.
 
-def calculate_expert_action(obs, hour, outdoor_temp, pv_gen):
+FIXED ISSUES:
+- Use ACTION_INDICES instead of hardcoded numbers
+- Removed dead code
+- Fixed bare except clauses
+- Made EV charging proportional
+- Improved AC thermostat thresholds
+"""
+
+import numpy as np
+from simulation.device_config import DEVICE_CONFIG, EV_CONFIG, ROOM_OCCUPANCY_HOURS, ACTION_INDICES
+
+
+def is_room_occupied(room: str, hour: int) -> bool:
+    """Check if room is occupied at specific hour based on schedule."""
+    ranges = ROOM_OCCUPANCY_HOURS.get(room, [])
+    for start, end in ranges:
+        if start <= end:
+            if start <= hour < end:
+                return True
+        else:
+            if hour >= start or hour < end:
+                return True
+    return False
+    # FIXED: Removed dead code (duplicate return False)
+
+
+def calculate_expert_action(obs, hour, outdoor_temp, n_home, ev_soc):
     """
-    Calculates a baseline action based on expert rules.
+    Calculates a baseline action based on SMART expert rules.
+    
+    IMPORTANT: Uses ACTION_INDICES for robust index mapping.
     
     Args:
-        obs: Current observation from environment (unused directly here, but good for signature)
-        hour (int): Current hour of day (0-23)
-        outdoor_temp (float): Outdoor temperature in Celsius
-        pv_gen (float): PV generation in kW (or whatever unit env uses, approx)
-        
+        obs: Current observation 
+             - obs[0] = battery SOC (0-1)
+             - obs[1] = PV generation (kW, raw)
+             - obs[2] = must-run load (kW)
+             - obs[8-10] = room temps (RAW °C, NOT normalized!)
+        hour (int): Current hour
+        outdoor_temp (float): Outdoor temperature (unused, kept for API compat)
+        n_home (int): Number of people home
+        ev_soc (float): EV State of Charge (0-1)
+    
     Returns:
-        np.array: A 7-dimensional action vector [-1, 1]
-        [Battery, AC1, AC2, AC3, EV, WM, DW]
+        np.array: 7-dim action vector
     """
-    # Initialize zero action (idle)
     action = np.zeros(7, dtype=np.float32)
     
-    # --- 1. Battery Rules ---
-    # Charge during high solar (e.g., > 3.0 kW)
-    if pv_gen > 3.0:
-        action[0] = 0.8  # Strong charge
-    # Discharge during night (no sun) or peak hours (17-23 usually)
-    # Simple heuristic: Discharge if dark or evening
-    elif hour >= 18 or hour < 6:
-        action[0] = -0.6 # Moderate discharge
+    # Get indices from config (not hardcoded!)
+    idx_bat = ACTION_INDICES.get('battery', 0)
+    idx_ac_living = ACTION_INDICES.get('ac_living', 1)
+    idx_ac_master = ACTION_INDICES.get('ac_master', 2)
+    idx_ac_bed2 = ACTION_INDICES.get('ac_bed2', 3)
+    idx_ev = ACTION_INDICES.get('ev', 4)
+    
+    # Extract observation values safely
+    try:
+        soc = float(obs[0])
+        pv_gen = float(obs[1])
+        net_load = float(obs[2])
+        # Room temps are RAW (NOT normalized) in SmartHomeEnv._get_obs()
+        t_living = float(obs[8])
+        t_master = float(obs[9])
+        t_bed2 = float(obs[10])
+    except (IndexError, TypeError) as e:
+        # Proper exception handling (not bare except)
+        soc = 0.5
+        pv_gen = 0.0
+        net_load = 0.3
+        t_living = t_master = t_bed2 = 25.0
+
+    # =========================================================
+    # 1. EV CHARGING (Priority 1) - Proportional, not binary
+    # =========================================================
+    is_off_peak = (hour >= 22 or hour < 4)
+    ev_deficit = max(0.0, 0.9 - ev_soc)  # How much more SOC needed
+    
+    if is_off_peak and ev_soc < 0.9:
+        # Proportional charging: charge harder if more deficit
+        action[idx_ev] = min(1.0, ev_deficit * 3.0)
+    elif pv_gen > net_load + 0.5 and ev_soc < 0.9:
+        # Use excess solar for EV (regardless of absolute PV value)
+        excess_ratio = (pv_gen - net_load) / max(pv_gen, 0.1)
+        action[idx_ev] = min(1.0, excess_ratio * ev_deficit * 2.0)
     else:
-        action[0] = 0.0  # Idle/Float
+        action[idx_ev] = 0.0
         
-    # --- 2. AC Rules ---
-    # Only run AC if really hot
-    if outdoor_temp > 32.0:
-        action[1] = 1.0 # AC Living ON
-        action[2] = 0.5 # AC Master Eco
-        # AC Bed2 (index 3) optional, keep 0
-    elif outdoor_temp > 30.0:
-        action[1] = 0.7 # AC Living Eco
+    # =========================================================
+    # 2. BATTERY RULES (Priority 2) - Economic + Technical Safety
+    # =========================================================
+    is_peak_hour = (9 <= hour <= 11) or (17 <= hour <= 20)
     
-    # --- 3. Shiftable Loads (WM, DW, EV) ---
-    # Expert rules for these are tricky without knowing state (remaining tasks).
-    # Ideally, we let the RL handle the precise timing, or simple rules:
-    # Run WM/DW during day if solar is good?
-    # For now, let's leave them 0 (let RL decide entirely, or mix with 0)
-    # Or provide a safe default like "Don't run unless urgent" (which is 0)
+    if pv_gen > net_load + 0.5:
+        # Charge from excess solar (always good)
+        action[idx_bat] = 0.8
+    elif is_peak_hour and soc > 0.2:
+        # Discharge during peak to save money
+        action[idx_bat] = -0.6
+    elif is_peak_hour and soc <= 0.2:
+        # Low SOC during peak: don't discharge, but also don't charge (expensive!)
+        action[idx_bat] = 0.0
+    else:
+        action[idx_bat] = 0.0
+
+    # =========================================================
+    # 3. AC THERMOSTAT (Priority 3) - Relaxed for Pre-cooling
+    # =========================================================
+    # Comfort Range: 24 - 27°C
+    # NEW: Wider threshold to allow PPO pre-cooling decisions
+    # Only force ON when very hot (>27.5), force OFF when not occupied
+    # In comfort zone, return moderate value for blending
     
-    # EV: Charge if solar is high?
-    if pv_gen > 4.0:
-        action[4] = 0.5
+    def thermostat_action(temp, room, hour):
+        """Smart thermostat with pre-cooling allowance."""
+        if not is_room_occupied(room, hour):
+            return -1.0  # Force OFF if empty
         
+        if temp > 27.5:
+            return 1.0   # Force High Cool (safety)
+        elif temp > 26.5:
+            return 0.5   # Medium cool
+        elif temp > 25.5:
+            return 0.2   # Light cool (allow PPO to optimize)
+        else:
+            return -1.0  # Comfortable, OFF
+    
+    action[idx_ac_living] = thermostat_action(t_living, "living", hour)
+    action[idx_ac_master] = thermostat_action(t_master, "master", hour)
+    action[idx_ac_bed2] = thermostat_action(t_bed2, "bed2", hour)
+            
     return action
 
-def get_residual_action(model, obs, hour, outdoor_temp, pv_gen, w_rl=0.1):
-    """
-    Implements Residual RL: Action = (1 - w) * Expert + w * RL
-    
-    Args:
-        model: Loaded PPO model
-        obs: Environment observation
-        hour: Current hour
-        outdoor_temp: Outdoor temp
-        pv_gen: PV generation
-        w_rl (float): Weight for RL component (0.0 to 1.0)
-        
-    Returns:
-        np.array: Final clipped action
-    """
-    # 1. Expert Action
-    expert_act = calculate_expert_action(obs, hour, outdoor_temp, pv_gen)
-    
-    # 2. RL Action
-    rl_act, _ = model.predict(obs, deterministic=True)
-    # Ensure flat array
-    rl_act = np.array(rl_act).flatten()
-    
-    # 3. Residual Combination
-    # Formula: Final = (1 - w) * Expert + w * RL
-    # This means we trust Expert by default, and let RL nudge it.
-    final_act = (1 - w_rl) * expert_act + w_rl * rl_act
-    
-    # 4. Safety Clipping
-    final_act = np.clip(final_act, -1.0, 1.0)
-    
-    return final_act
 
-# Alias for compatibility with train_il_bc.py
-# Note: train_il_bc expects (obs, hour, price), but calculate_expert_action expects (obs, hour, outdoor_temp, pv_gen).
-# We need an adapter wrapper.
+def get_residual_action(model, obs, hour, outdoor_temp, pv_gen, w_rl=0.1):
+    """Blend expert and RL actions."""
+    try:
+        n_home = int(obs[6])
+        ev_soc = float(obs[12]) if len(obs) > 12 else 0.5
+    except (IndexError, TypeError):
+        n_home = 0
+        ev_soc = 0.5
+    
+    expert_act = calculate_expert_action(obs, hour, outdoor_temp, n_home, ev_soc)
+    
+    rl_act, _ = model.predict(obs, deterministic=True)
+    rl_act = np.array(rl_act).flatten()
+    final_act = (1 - w_rl) * expert_act + w_rl * rl_act
+    return np.clip(final_act, -1.0, 1.0)
+
 
 def expert_heuristic_action(obs, hour, price):
     """
-    Adapter to match signature expected by train_il_bc.py:
-    func(obs, hour, price) -> action
+    Adapter for train_il_bc.py
     
-    We need to extract outdoor_temp and pv_gen from obs or heuristics.
-    SmartHomeEnv Observation structure:
-    [0] soc, [1] pv, [2] must, [3] fut_pv, [4]-[5] time_sin/cos, [6] n_home, [7] temp_out, ...
-    So temp_out is obs[7], pv is obs[1]
+    Note: obs[7] is temp_out (RAW temperature from SmartHomeEnv)
     """
     try:
-        pv_gen = obs[1] # Raw kW value from env 
-        # In collecting data, env.reset() returns obs. 
-        # SmartHomeEnv _get_obs returns [soc, pv, ...] 
-        # PV in obs is direct from pv_profile.
-        # Temp is obs[7].
+        n_home = int(obs[6])
+        outdoor_temp = float(obs[7])  # RAW temp, not normalized
+        ev_soc = float(obs[12]) if len(obs) > 12 else 0.5 
         
-        outdoor_temp = obs[7]
-        # Note: If standardized, these might be scaled. 
-        # But SmartHomeEnv usually returns physical values in _get_obs unless wrapped.
-        
-        return calculate_expert_action(obs, hour, outdoor_temp, pv_gen)
-    except Exception as e:
-        print(f"Error in adapter: {e}")
+        return calculate_expert_action(obs, hour, outdoor_temp, n_home, ev_soc)
+    except (IndexError, TypeError, ValueError) as e:
         return np.zeros(7)

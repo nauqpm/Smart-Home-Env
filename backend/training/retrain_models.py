@@ -20,11 +20,19 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 
+import sys
 import gymnasium as gym
+
+# Add parent directory (backend) to sys.path to resolve 'simulation' and 'algorithms'
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Updated imports for new structure
-from backend.simulation.smart_home_env import SmartHomeEnv
-from backend.simulation.device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, DEVICE_CONFIG, THERMAL_CONSTANTS
-from backend.algorithms.expert_utils import expert_heuristic_action, is_room_occupied
+from simulation.smart_home_env import SmartHomeEnv
+from simulation.device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, DEVICE_CONFIG, THERMAL_CONSTANTS
+from algorithms.expert_utils import expert_heuristic_action, is_room_occupied
+from algorithms.hybrid_training_env import HybridTrainingEnvWrapper
+# Reuse LBWO logic from train_il_bc
+from training.train_il_bc import collect_expert_data, train_bc, BCPolicyPPOCompat
 
 # =====================================================
 # Constants
@@ -43,88 +51,23 @@ HIDDEN_SIZE = 256
 # =====================================================
 # BC (Behavior Cloning) Training Section
 # =====================================================
-class BCPolicyPPOCompat(nn.Module):
-    """
-    BC Policy with LARGER Network [256, 256] to match PPO policy_kwargs
-    """
-    def __init__(self, obs_dim=OBS_DIM, action_dim=ACTION_DIM):
-        super().__init__()
-        self.mlp_extractor = nn.ModuleDict({
-            'policy_net': nn.Sequential(
-                nn.Linear(obs_dim, HIDDEN_SIZE),    # 256
-                nn.Tanh(),
-                nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE), # 256
-                nn.Tanh(),
-            )
-        })
-        self.action_net = nn.Linear(HIDDEN_SIZE, action_dim)
-        
-    def forward(self, x):
-        features = self.mlp_extractor['policy_net'](x)
-        return self.action_net(features)
-
-def collect_expert_data(n_episodes=50):
-    """Collect expert demonstrations using Centralized Expert Logic"""
-    obs_list, act_list = [], []
-    price = np.array([0.1] * 6 + [0.15] * 6 + [0.25] * 6 + [0.18] * 6)
-    pv = np.zeros(24)
-
-    config = {'sim_steps': 24}
-
-    print(f"  Collecting {n_episodes} expert episodes...")
-    for ep in range(n_episodes):
-        day = datetime(2025, 1, 1) + timedelta(days=random.randint(0, 365))
-        config["sim_start"] = day.strftime("%Y-%m-%d")
-
-        env = SmartHomeEnv(price, pv, config)
-        obs, _ = env.reset()
-
-        for t in range(env.sim_steps):
-            hour = t % 24
-            expert_action = expert_heuristic_action(obs, hour, price)
-            
-            obs_list.append(obs.astype(np.float32))
-            act_list.append(expert_action)
-
-            obs, _, done, _, _ = env.step(expert_action)
-            if done:
-                break
-                
-    return np.stack(obs_list), np.stack(act_list)
-
-def train_bc(X, Y, epochs=100):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = BCPolicyPPOCompat(obs_dim=X.shape[1], action_dim=Y.shape[1]).to(device)
-    opt = optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.MSELoss()
-
-    X_t = torch.tensor(X, device=device)
-    Y_t = torch.tensor(Y, device=device)
-
-    print(f"  Training BC Policy [256x256]: {X.shape[0]} samples, {epochs} epochs")
-
-    for e in range(epochs):
-        opt.zero_grad()
-        pred = model(X_t)
-        loss = loss_fn(pred, Y_t)
-        loss.backward()
-        opt.step()
-
-    save_dict = {"model_state_dict": model.state_dict()}
-    torch.save(save_dict, "bc_policy.pt")
-    print(f"  ✅ Saved FRESH bc_policy.pt (256x256 network)")
+# Logic moved to training/train_il_bc.py to support LBWO
+# functions collect_expert_data() and train_bc() are imported above
 
 def run_bc_training(episodes=100, epochs=150):
     print(f"\n{'='*60}")
     print(f"Phase 1: Behavior Cloning (LARGE NET [256,256])")
     print(f"{'='*60}")
-    X, Y = collect_expert_data(n_episodes=episodes)
+    print(f"{'='*60}")
+    # Pass default config for simulation parameters
+    default_cfg = {'sim_steps': 24} 
+    X, Y = collect_expert_data(default_cfg, n_episodes=episodes)
     train_bc(X, Y, epochs=epochs)
 
 # =====================================================
 # BC Warm-Start Utility
 # =====================================================
-def load_il_weights_into_ppo(model, path="bc_policy.pt"):
+def load_il_weights_into_ppo(model, path="models/bc_policy.pt"):
     if not os.path.exists(path):
         print(f"⚠ {path} not found → PPO from scratch (no warm-start)")
         return model
@@ -190,9 +133,26 @@ class ProgressPrintCallback(BaseCallback):
 # Training Functions
 # =====================================================
 def make_env():
+    """Standard environment for PPO Baseline training."""
     def _init():
         config = {'time_step_hours': 1.0, 'sim_steps': 24}
         env = SmartHomeEnv(None, None, config)
+        env = GymCompatWrapper(env)
+        env = Monitor(env)
+        return env
+    return _init
+
+def make_env_hybrid():
+    """Environment with Expert Rules for Hybrid training.
+    
+    This wrapper applies SAME expert rules as hybrid_wrapper.py during training,
+    so the PPO policy learns to optimize within expert constraints.
+    This fixes the training-inference mismatch issue.
+    """
+    def _init():
+        config = {'time_step_hours': 1.0, 'sim_steps': 24}
+        env = SmartHomeEnv(None, None, config)
+        env = HybridTrainingEnvWrapper(env)  # Apply expert rules during training!
         env = GymCompatWrapper(env)
         env = Monitor(env)
         return env
@@ -219,17 +179,19 @@ def train_ppo(episodes=1000):
     logger = EpisodeRewardLogger()
     model.learn(total_timesteps=total_timesteps, callback=[logger, ProgressPrintCallback(total_timesteps)])
     
-    model.save("ppo_smart_home")
-    np.save("ppo_baseline_rewards.npy", logger.episode_rewards)
+    model.save("models/ppo_smart_home")
+    np.save("models/ppo_baseline_rewards.npy", logger.episode_rewards)
     return logger.episode_rewards
 
 def train_hybrid(episodes=1000):
     T = 24
     total_timesteps = T * episodes
     print(f"\n{'='*60}\n🧠 Training Hybrid PPO Model (LARGE NET [256,256] + BC Init)\n{'='*60}")
-    print("Strategy: Low LR to preserve Expert Knowledge (Fine-tuning)")
+    print("Strategy: Training WITH Expert Rules (HybridTrainingEnvWrapper)")
+    print("         + Low LR to preserve Expert Knowledge (Fine-tuning)")
 
-    vec_env = DummyVecEnv([make_env()])
+    # KEY CHANGE: Use make_env_hybrid() which includes expert rule wrapper
+    vec_env = DummyVecEnv([make_env_hybrid()])
     
     # UPGRADED: Use 256x256 network to match BC
     policy_kwargs = dict(net_arch=dict(pi=[256, 256], vf=[256, 256]))
@@ -249,13 +211,13 @@ def train_hybrid(episodes=1000):
     )
 
     # Load FRESH BC weights (now 256x256)
-    model = load_il_weights_into_ppo(model, path="bc_policy.pt")
+    model = load_il_weights_into_ppo(model, path="models/bc_policy.pt")
 
     logger = EpisodeRewardLogger()
     model.learn(total_timesteps=total_timesteps, callback=[logger, ProgressPrintCallback(total_timesteps)])
 
-    model.save("ppo_hybrid_smart_home")
-    np.save("ppo_hybrid_rewards.npy", logger.episode_rewards)
+    model.save("models/ppo_hybrid_smart_home")
+    np.save("models/ppo_hybrid_rewards.npy", logger.episode_rewards)
     return logger.episode_rewards
 
 def main():
@@ -264,6 +226,21 @@ def main():
     parser.add_argument("--bc-episodes", type=int, default=2000)  # More data for larger net
     parser.add_argument("--bc-epochs", type=int, default=500)
     args = parser.parse_args()
+
+    # CLEAR OLD MODELS FIRST - ensure fresh training
+    import shutil
+    import glob
+    models_dir = "models"
+    if os.path.exists(models_dir):
+        files = glob.glob(os.path.join(models_dir, "*"))
+        for f in files:
+            try:
+                os.remove(f)
+                print(f"🗑️ Deleted: {f}")
+            except Exception as e:
+                print(f"⚠️ Could not delete {f}: {e}")
+    os.makedirs(models_dir, exist_ok=True)
+    print(f"\n✅ Cleared models folder. Starting fresh training...\n")
 
     # ALWAYS RUN BC Phase to ensure file is fresh
     run_bc_training(episodes=args.bc_episodes, epochs=args.bc_epochs)

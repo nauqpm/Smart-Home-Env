@@ -14,17 +14,23 @@ import torch.nn as nn
 import torch.optim as optim
 from datetime import datetime, timedelta
 
-from backend.simulation.smart_home_env import SmartHomeEnv
-from backend.simulation.device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, THERMAL_CONSTANTS
-from backend.algorithms.expert_utils import expert_heuristic_action  # <--- Centralized Import
+import sys
+import os
+
+# Add parent directory (backend) to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from simulation.smart_home_env import SmartHomeEnv
+from simulation.device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, THERMAL_CONSTANTS
+from algorithms.expert_utils import expert_heuristic_action  # <--- Centralized Import
 
 try:
-    from backend.algorithms.milp_expert import build_and_solve_milp
+    from algorithms.milp_expert import build_and_solve_milp
     HAS_MILP = True
 except Exception:
     HAS_MILP = False
 
-from backend.algorithms.lbwo_solver import LBWOSolver
+
 
 SEED = 42
 random.seed(SEED)
@@ -50,8 +56,11 @@ DEFAULT_CFG = {
 
 
 # ------------------------------
+# ------------------------------
 def get_env_inputs():
-    price = np.array([0.1] * 6 + [0.15] * 6 + [0.25] * 6 + [0.18] * 6)
+    # Use FLAT price to force Self-Consumption strategy (Optimal for Tiered Bill)
+    # RTP arbitrage causes losses due to efficiency < 100% when bill is Tiered/Flat.
+    price = np.array([0.15] * 24) 
     # Match "Ideal Day" profile from ws_server.py to ensures expert sees solar!
     pv = np.array([0, 0, 0, 0, 0, 0, 0.2, 0.8, 1.5, 2.5, 3.2, 3.8, 4.0, 3.8, 3.0, 2.0, 1.0, 0.3, 0, 0, 0, 0, 0, 0])
     return price, pv
@@ -83,34 +92,81 @@ class BCPolicyPPOCompat(nn.Module):
 
 
 # ------------------------------
+from algorithms.lbwo_solver import LBWOOptimizer 
+
 def collect_expert_data(cfg, n_episodes=10):
-    """Collect expert demonstrations for all 7 actions"""
+    """
+    Collect expert demonstrations using LBWO for Battery Optimization 
+    and Rule-based Heuristics for other devices.
+    """
     obs_list, act_list = [], []
-    
     price, pv = get_env_inputs()
 
+    print(f"Starting LBWO Expert Data Collection ({n_episodes} episodes)...")
+
+    # LBWO Config (Match Environment)
+    lbwo = LBWOOptimizer(
+        n_whales=30, 
+        max_iter=50, # Sufficient for convergence 
+        n_vars=24,
+        lb=-3.0, ub=3.0, # Battery Power Limits
+        soc_min=1.0, soc_max=9.0, initial_soc=5.0, ess_capacity=10.0
+    )
+
     for ep in range(n_episodes):
+        # Random start day
         day = datetime(2025, 1, 1) + timedelta(days=random.randint(0, 365))
         cfg_ep = cfg.copy()
         cfg_ep["sim_start"] = day.strftime("%Y-%m-%d")
 
         env = SmartHomeEnv(price, pv, cfg_ep)
         obs, _ = env.reset()
-
+        
+        # 1. Get 24h Forecast
+        day_data = env.get_current_day_forecast()
+        
+        # 2. Setup LBWO
+        lbwo.initial_soc = obs[0] * 10.0 # Convert normalized SOC (0-1) to kWh (0-10)
+        lbwo.set_environment_data(
+            day_data['price_buy'],
+            day_data['price_sell'],
+            day_data['load'],
+            day_data['pv'],
+            day_data['wind']
+        )
+        
+        # 3. Optimize Battery Schedule (Global Optimization)
+        # print(f"  > Optimize Day {ep+1}...", end="\r")
+        best_schedule_24h = lbwo.optimize() # Returns array of 24 float values (Battery kW)
+        
+        # 4. Step Environment
         for t in range(env.sim_steps):
             hour = t % 24
             
-            # Expert action using centralized utility
-            expert_action = expert_heuristic_action(obs, hour, price)
+            # Action 1: Get Battery Action from LBWO
+            # LBWO output is Power (kW) [-3, 3]. Env expects Normalized Action [-1, 1].
+            # Map [-3, 3] -> [-1, 1]
+            bat_kw = best_schedule_24h[t]
+            bat_action_norm = np.clip(bat_kw / 3.0, -1.0, 1.0)
             
+            # Action 2: Get Other Devices Actions from Rules (Heuristic)
+            # We use expert_heuristic_action but override the battery component
+            rule_action = expert_heuristic_action(obs, hour, price)
+            
+            # Combine
+            final_action = rule_action.copy()
+            final_action[0] = bat_action_norm # OVERRIDE Battery with Optimal Plan
+            
+            # Store
             obs_list.append(obs.astype(np.float32))
-            act_list.append(expert_action)
+            act_list.append(final_action)
 
-            obs, _, done, _, _ = env.step(expert_action)
+            obs, _, done, _, _ = env.step(final_action)
             if done:
                 break
-
-        print(f"Collected episode {ep + 1}/{n_episodes}")
+                
+        if (ep + 1) % 5 == 0:
+            print(f"Collected episode {ep + 1}/{n_episodes}")
 
     return np.stack(obs_list), np.stack(act_list)
 
@@ -143,16 +199,16 @@ def train_bc(X, Y, epochs=100):
             print(f"Epoch {e+1}/{epochs} | Loss {loss.item():.4f}")
 
     save_dict = {"model_state_dict": model.state_dict()}
-    torch.save(save_dict, "bc_policy.pt")
+    os.makedirs("models", exist_ok=True)
+    torch.save(save_dict, "models/bc_policy.pt")
     
-    print(f"\n✅ Saved bc_policy.pt")
-
+    print(f"\n✅ Saved bc_policy.pt to models/")
 
 # ------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", type=int, default=2000)  # Increased for 256x256 net
-    parser.add_argument("--epochs", type=int, default=500)      # Increased 2.5x
+    parser.add_argument("--episodes", type=int, default=50) # Fewer episodes needed due to high quality? Keep 50 for speed testing.
+    parser.add_argument("--epochs", type=int, default=500)
     args = parser.parse_args()
 
     X, Y = collect_expert_data(DEFAULT_CFG, args.episodes)

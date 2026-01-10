@@ -16,7 +16,7 @@ import uvicorn
 # Import from new package structure
 from simulation.smart_home_env import SmartHomeEnv
 from simulation.device_config import DEVICE_CONFIG, ACTION_INDICES, ROOM_OCCUPANCY_HOURS
-# from rl_ppo_hybrid_new import HybridAgentWrapper # REMOVED: Using pure PPO model
+from algorithms.hybrid_wrapper import HybridAgentWrapper
 
 # Try to import stable_baselines3
 try:
@@ -255,8 +255,9 @@ class RealModelSimulation:
                 logger.warning(f"⚠️ PPO model not found: {ppo_path}")
             
             if os.path.exists(hybrid_path):
-                self.hybrid_model = PPO.load(hybrid_path)
-                logger.info(f"✅ Loaded Hybrid model from {hybrid_path}")
+                hybrid_base = PPO.load(hybrid_path)
+                self.hybrid_model = HybridAgentWrapper(hybrid_base)
+                logger.info(f"✅ Loaded Hybrid model from {hybrid_path} (with Wrapper)")
             else:
                 logger.warning(f"⚠️ Hybrid model not found: {hybrid_path}")
             
@@ -321,6 +322,10 @@ class RealModelSimulation:
     def _get_env_state(self, env):
         """Extract environment state for Hybrid rules"""
         hour = self.step_count % 24
+        
+        # Get room temperatures (RAW values for hybrid_wrapper)
+        room_temps = getattr(env, 'room_temps', {'living': 25.0, 'master': 25.0, 'bed2': 25.0})
+        
         return {
             'hour': hour,
             'soc': env.soc,
@@ -331,7 +336,11 @@ class RealModelSimulation:
             'dw_deadline': getattr(env, 'dw_deadline', 23),
             'n_home': env.load_schedules[min(self.step_count, 23)]['n_home'] if hasattr(env, 'load_schedules') else 0,
             'price_tier': self._get_price_tier(env.cumulative_import_kwh),
-            'temp_out': getattr(env, 'temp_out', 30)
+            'temp_out': getattr(env, 'temp_out', 30),
+            # Room temps for soft AC override in hybrid_wrapper
+            'temp_living': room_temps.get('living', 25.0),
+            'temp_master': room_temps.get('master', 25.0),
+            'temp_bed2': room_temps.get('bed2', 25.0),
         }
     
     def _get_price_tier(self, cumulative_kwh):
@@ -341,6 +350,24 @@ class RealModelSimulation:
         elif cumulative_kwh <= 300: return 4
         elif cumulative_kwh <= 400: return 5
         else: return 6
+    
+    def reset_simulation(self):
+        """Reset simulation to initial state - called by frontend Reset button"""
+        logger.info("🔄 Resetting simulation state...")
+        
+        # Reset step counter
+        self.step_count = 0
+        self.done = False
+        self.paused = False
+        
+        # Reset session statistics
+        self.stats_ppo.reset()
+        self.stats_hybrid.reset()
+        
+        # Reinitialize environments with same seed for consistency
+        self._init_environments()
+        
+        logger.info("✅ Simulation reset complete")
     
     def _generate_final_report(self):
         """Generate FINAL_REPORT packet at end of demo day (hour 23)"""
@@ -458,13 +485,15 @@ class RealModelSimulation:
                 )
             
             # --- GET HYBRID ACTION ---
-            # True Hybrid: PPO + Imitation Learning (Pure Model)
+            # True Hybrid: PPO + Imitation Learning (Pure Model) + Rule Wrapper
             if self.use_real_models and self.hybrid_model is not None:
-                if self.is_demo_mode and self.obs_hybrid is not None:
-                    # print(f"DEBUG OBS HYBRID: {self.obs_hybrid}")
-                    action_hybrid, _ = self.hybrid_model.predict(self.obs_hybrid)
-                else:
-                    action_hybrid, _ = self.hybrid_model.predict(self.obs_hybrid)
+                # Pass hybrid_state (contains hour, soc, n_home) to the wrapper
+                action_hybrid, _ = self.hybrid_model.predict(
+                    self.obs_hybrid, 
+                    env_state=hybrid_state,
+                    deterministic=True
+                )
+                
                 action_hybrid = np.array(action_hybrid, dtype=np.float32).flatten()
                 # DEBUG: Log PV and Action to console
                 try:
@@ -849,12 +878,38 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("📤 Sent initial data packet")
         
         while True:
-            # Just keep connection alive and listen for any messages (e.g. manual control)
-            # This prevents the handler from exiting and closing the socket
+            # Listen for control messages from frontend
             data = await websocket.receive_text()
-            # Optional: Handle manual control messages here if needed
-            # For now just log heartbeat or ignore
-            # logger.debug(f"Received from client: {data}")
+            
+            try:
+                import json
+                msg = json.loads(data)
+                msg_type = msg.get('type', '')
+                
+                if msg_type == 'pause':
+                    sim.paused = True
+                    logger.info("⏸️ Simulation PAUSED by client")
+                    
+                elif msg_type == 'resume':
+                    sim.paused = False
+                    logger.info("▶️ Simulation RESUMED by client")
+                    
+                elif msg_type == 'reset':
+                    logger.info("🔄 Simulation RESET by client")
+                    sim.reset_simulation()
+                    # Send fresh initial data after reset
+                    fresh_data = sim.get_data_packet()
+                    await websocket.send_json(fresh_data)
+                    logger.info("📤 Sent fresh data after reset")
+                    
+                elif msg_type == 'manual_control':
+                    device = msg.get('device', '')
+                    state = msg.get('state', False)
+                    logger.info(f"🎛️ Manual control: {device} -> {state}")
+                    # TODO: Handle manual override if needed
+                    
+            except json.JSONDecodeError:
+                logger.debug(f"Non-JSON message received: {data}")
             
     except WebSocketDisconnect:
         logger.info(f"❌ Client disconnected normally")
