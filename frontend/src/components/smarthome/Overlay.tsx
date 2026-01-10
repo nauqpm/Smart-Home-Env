@@ -435,8 +435,13 @@ export default function Overlay() {
     // Portal to document.body so overlay stays fixed when 3D camera moves
     return (
         <>
-            {createPortal(overlayContent, document.body)}
-            <ReportModal />
+            {createPortal(
+                <>
+                    {overlayContent}
+                    <ReportModal />
+                </>,
+                document.body
+            )}
         </>
     );
 }

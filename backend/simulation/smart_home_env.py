@@ -390,7 +390,14 @@ class SmartHomeEnv(gym.Env):
         # Quadratic penalty that grows faster as deadline approaches
         reward -= (ev_deficit ** 2) * (50.0 / hours_left)  # Increased from 10.0 to 50.0
 
-        # --- 4. Task Completion Bonuses ---
+        # --- 4. Peak Price Charging Penalty (NEW - Synced with ws_server.py) ---
+        # Vietnam EVN peak hours: 9-11h and 17-20h
+        # Penalize battery charging during expensive hours (reward shaping for RL)
+        is_peak_vn = (9 <= hour < 11) or (17 <= hour < 20)
+        if is_peak_vn and act_bat > 0.05:  # act_bat > 0 means charging
+            reward -= 2.0 * act_bat  # Stronger penalty for higher charge rate
+
+        # --- 5. Task Completion Bonuses ---
         # Encourage actually completing tasks
         # Note: These are implicitly handled since completing tasks removes penalties
 

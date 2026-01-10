@@ -30,7 +30,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from simulation.smart_home_env import SmartHomeEnv
 from simulation.device_config import ROOM_OCCUPANCY_HOURS, EV_CONFIG, DEVICE_CONFIG, THERMAL_CONSTANTS
 from algorithms.expert_utils import expert_heuristic_action, is_room_occupied
-from algorithms.hybrid_training_env import HybridTrainingEnvWrapper
+# NOTE: HybridTrainingEnvWrapper removed - Standard RL uses reward shaping, not action modification
 # Reuse LBWO logic from train_il_bc
 from training.train_il_bc import collect_expert_data, train_bc, BCPolicyPPOCompat
 
@@ -143,16 +143,19 @@ def make_env():
     return _init
 
 def make_env_hybrid():
-    """Environment with Expert Rules for Hybrid training.
+    """Environment for Hybrid training - Standard RL approach.
     
-    This wrapper applies SAME expert rules as hybrid_wrapper.py during training,
-    so the PPO policy learns to optimize within expert constraints.
-    This fixes the training-inference mismatch issue.
+    KEY CHANGE (Standard RL Method):
+    - NO action modification during training
+    - PPO learns from REWARD SHAPING in SmartHomeEnv (peak charging penalty)
+    - Warm-start from BC policy for faster convergence
+    - HybridAgentWrapper applies expert rules only at INFERENCE time
+    
+    This ensures Policy Gradient Theorem is respected.
     """
     def _init():
         config = {'time_step_hours': 1.0, 'sim_steps': 24}
-        env = SmartHomeEnv(None, None, config)
-        env = HybridTrainingEnvWrapper(env)  # Apply expert rules during training!
+        env = SmartHomeEnv(None, None, config)  # Same env as PPO baseline
         env = GymCompatWrapper(env)
         env = Monitor(env)
         return env
@@ -187,8 +190,8 @@ def train_hybrid(episodes=1000):
     T = 24
     total_timesteps = T * episodes
     print(f"\n{'='*60}\n🧠 Training Hybrid PPO Model (LARGE NET [256,256] + BC Init)\n{'='*60}")
-    print("Strategy: Training WITH Expert Rules (HybridTrainingEnvWrapper)")
-    print("         + Low LR to preserve Expert Knowledge (Fine-tuning)")
+    print("Strategy: Standard RL (BC Warm-start + Reward Shaping)")
+    print("         + Expert rules applied at INFERENCE only (HybridAgentWrapper)")
 
     # KEY CHANGE: Use make_env_hybrid() which includes expert rule wrapper
     vec_env = DummyVecEnv([make_env_hybrid()])

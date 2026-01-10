@@ -140,7 +140,8 @@ class HybridAgentWrapper:
         # ==========================================================
         # C. BATTERY SAFETY (Technical + Economic)
         # ==========================================================
-        is_peak_hour = (9 <= hour <= 11) or (17 <= hour <= 20)
+        # Vietnam EVN peak hours: 9-11h and 17-20h (synced with ws_server.py)
+        is_peak_hour = (9 <= hour < 11) or (17 <= hour < 20)
         
         # Technical safety: Prevent deep discharge
         if soc < 0.15:

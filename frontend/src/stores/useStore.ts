@@ -382,6 +382,13 @@ export const useStore = create<AppState>((set, get) => ({
     currentScenario: 'ideal',
     setDemoMode: async (enabled, scenario) => {
         const newScenario = scenario || get().currentScenario;
+
+        // Reset local state immediately when enabling/switching to show loading state
+        // and prevent old data from lingering.
+        if (enabled) {
+            get().resetSimulation();
+        }
+
         set({ isDemoMode: enabled, currentScenario: newScenario as any });
 
         try {
@@ -390,10 +397,7 @@ export const useStore = create<AppState>((set, get) => ({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ demo_mode: enabled, scenario: newScenario })
             });
-            // Reset local state when toggling demo mode
-            if (enabled) {
-                get().resetSimulation();
-            }
+            // No need to reset here anymore, we did it before the fetch
         } catch (e) {
             console.error('Failed to set demo mode:', e);
         }

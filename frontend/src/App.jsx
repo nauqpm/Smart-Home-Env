@@ -37,20 +37,26 @@ function App() {
         try {
           const data = JSON.parse(event.data);
 
+          // Log every message type for debugging
+          if (data.type) {
+            console.log(`📨 Received message type: ${data.type}`);
+          }
+
           // Check for FINAL_REPORT message from demo mode
           if (data.type === 'FINAL_REPORT') {
             console.log('📊 Received FINAL_REPORT:', data.data?.scenario);
+            console.log('📊 Report metrics:', data.data?.metrics);
             setReportData(data.data);
-            // Also update simData with the included packet data
-            if (data.timestamp) {
-              updateSimData(data);
-            }
+            // Also update simData with the included packet data (has timestamp, env, ppo, hybrid)
+            // This ensures dashboard still shows data after simulation completes
+            updateSimData(data);
           } else {
             // Regular simulation packet
             updateSimData(data);
           }
         } catch (e) {
           console.error('Parse error:', e);
+          console.error('Raw data:', event.data?.substring(0, 500));
         }
       };
 

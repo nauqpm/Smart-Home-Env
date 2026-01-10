@@ -175,8 +175,20 @@ class RealModelSimulation:
         # Environment config (Synced with main.py)
         # Keeping 24 hours simulation as standard
         T = 24
-        # Scaling for VND roughly (mock) or just unitless cost
-        self.price_profile = np.array([0.1] * 6 + [0.15] * 6 + [0.25] * 6 + [0.18] * 6) * 10000 
+        
+        # Vietnam EVN-style hourly pricing (VND/kWh equivalent):
+        # - Peak hours (9-11h, 17-20h): Highest price (0.28)
+        # - Off-peak night (22-04h): Lowest price (0.10)
+        # - Standard hours: Normal price (0.15)
+        prices = []
+        for h in range(24):
+            if (9 <= h < 11) or (17 <= h < 20):  # Peak: 9,10 and 17,18,19
+                prices.append(0.28)
+            elif (22 <= h) or (h < 4):           # Off-peak night: 22-03h
+                prices.append(0.10)
+            else:                                # Standard
+                prices.append(0.15)
+        self.price_profile = np.array(prices) * 10000  # Scale for VND 
         
         self.config = {
             "critical": [0.33] * 24, # Tải nền
@@ -828,6 +840,17 @@ async def set_mode(payload: dict):
     
     sim.set_demo_mode(demo_mode, scenario)
     
+    # Broadcast initial data immediately to all connected clients
+    # This prevents the "Waiting..." delay on frontend
+    if connected_clients:
+        try:
+            initial_data = sim.get_data_packet()
+            for client in connected_clients:
+                await client.send_json(initial_data)
+            logger.info("📤 Broadcasted initial data after set_mode")
+        except Exception as e:
+            logger.error(f"❌ Failed to broadcast in set_mode: {e}")
+    
     return {
         "status": "ok",
         "demo_mode": sim.is_demo_mode,
@@ -930,9 +953,9 @@ async def startup_event():
     logger.info(f"   PPO Model: {'✅ Loaded' if sim.ppo_model else '❌ Not found'}")
     logger.info(f"   Hybrid Model: {'✅ Loaded' if sim.hybrid_model else '❌ Not found'}")
     logger.info("=" * 60)
-    logger.info("📡 WebSocket: ws://localhost:8001/ws")
-    logger.info("🌐 HTTP Poll: http://localhost:8001/data")
-    logger.info("🔄 Reload Models: http://localhost:8001/reload-models")
+    logger.info("📡 WebSocket: ws://localhost:8012/ws")
+    logger.info("🌐 HTTP Poll: http://localhost:8012/data")
+    logger.info("🔄 Reload Models: http://localhost:8012/reload-models")
     logger.info("=" * 60)
     
     # Start background simulation loop
@@ -954,12 +977,19 @@ async def simulation_background_loop():
             
             # Broadcast if we have data
             if data and connected_clients:
+                # Log when sending FINAL_REPORT
+                if data.get('type') == 'FINAL_REPORT':
+                    logger.info(f"📤 Broadcasting FINAL_REPORT to {len(connected_clients)} client(s)")
+                
                 # Broadcast to all connected clients
                 disconnected = []
                 for client in connected_clients:
                     try:
                         await client.send_json(data)
-                    except Exception:
+                        if data.get('type') == 'FINAL_REPORT':
+                            logger.info(f"✅ FINAL_REPORT sent successfully to client")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to send to client: {e}")
                         disconnected.append(client)
                 
                 # Cleanup disconnected
@@ -969,6 +999,8 @@ async def simulation_background_loop():
                         
         except Exception as e:
             logger.error(f"❌ Error in background loop: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             await asyncio.sleep(1.0)  # Prevent tight loop on error
 
 

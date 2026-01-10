@@ -86,7 +86,38 @@ export default function ComparisonDashboard() {
         currentViewMode,
         setViewMode,
         isConnected,
+        showReport,
+        setShowReport,
+        reportData,
     } = useStore();
+
+    // If simulation completed (has report), show completion message
+    if (!simData && reportData) {
+        return (
+            <div style={{ ...panelStyle, textAlign: 'center', padding: 40 }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+                <div style={{ fontSize: 18, color: '#22c55e', marginBottom: 16 }}>
+                    Simulation Completed!
+                </div>
+                <button
+                    onClick={() => setShowReport(true)}
+                    style={{
+                        padding: '12px 24px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
+                        color: '#fff',
+                        fontWeight: 600,
+                        fontSize: 14,
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 15px rgba(99, 102, 241, 0.4)',
+                    }}
+                >
+                    📊 View Final Report
+                </button>
+            </div>
+        );
+    }
 
     if (!simData) {
         return (
